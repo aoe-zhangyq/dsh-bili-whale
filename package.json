@@ -25,6 +25,7 @@
     "tools",
     "cordis.patch.yml",
     "README.md",
+    "OPENVIKING.md",
     "tests",
     "AUDIT-FIXES.md",
     "RISK-PROTECTION.md",

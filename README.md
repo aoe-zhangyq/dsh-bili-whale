@@ -1,5 +1,7 @@
 # dsh-bili-whale 0.4.6
 
+OpenViking 记忆接入与 Windows 配置见 [OPENVIKING.md](OPENVIKING.md)；两本本地日记继续保留。
+
 > 2026-10-25 扫码增补版：在最新 BUG 修复版上加入「设置 → 养鱼 → B 站登录 → 扫码登录」。使用与验证说明见 [QR-LOGIN-2026-10-25.md](QR-LOGIN-2026-10-25.md)。
 
 
