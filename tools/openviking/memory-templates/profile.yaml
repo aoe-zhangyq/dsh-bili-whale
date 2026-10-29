@@ -1,0 +1,18 @@
+memory_type: profile
+description: |
+  Stable profile of the configured owner, not every person in a multi-person comment thread.
+  For Bilibili messages only source relationship=owner identifies the owner at that time.
+  Extract only stable facts explicitly stated or confirmed by that human.
+  Assistant messages, quotes, third-party claims and guessed traits are not self-confirmation.
+  Do not put other commenters into this profile; use entities/people/bilibili_<MID> for them.
+  Preserve the owner's MID with each fact to avoid mixing different owners after configuration changes.
+  Preserve source channel, message time and public/private visibility. Exclude sensitive private data.
+  Current role settings are not the owner's profile and must not be inferred from roleplay.
+directory: "viking://user/{{ user_space }}/memories"
+filename_template: "profile.md"
+enabled: true
+fields:
+  - name: content
+    type: string
+    description: Stable owner facts, each attributed to bilibili_<MID>, with source time, channel and public/private visibility.
+    merge_op: patch

@@ -1,0 +1,33 @@
+memory_type: preferences
+description: |
+  Durable preferences explicitly expressed or confirmed by the person who owns the preference.
+  For Bilibili messages identify that person by bilibili_<MID> from source metadata.
+  Nicknames and session IDs are not person keys. Merge the same person's same topic across channels.
+  A user message's source person is its author; an assistant message's source person is the recipient.
+  Assistant suggestions, jokes, quotes and third-party descriptions are not preference confirmation.
+  Store one independently updatable topic per file. A preferred form of address is one such topic.
+  Before creating a file, search existing preferences for that MID and reuse an existing topic key
+  with the same meaning. English and Chinese names for the same topic are aliases, not new topics.
+  Preserve the source time, channel and public/private visibility of each assertion.
+  New explicit confirmation may replace an older preference; channel alone does not determine truth.
+directory: "viking://user/{{ user_space }}/memories/preferences"
+filename_template: "{{ user }}/{{ topic }}.md"
+enabled: true
+overview_template: |-
+  # Preferences Overview
+  {% for item in items %}
+  - [{{ item.file_content.user }} / {{ item.file_content.topic }}](./{{ item.file_name }})
+  {% endfor %}
+fields:
+  - name: user
+    type: string
+    description: For Bilibili people, exactly bilibili_<MID> from source metadata.
+    merge_op: immutable
+  - name: topic
+    type: string
+    description: A single stable preference topic, such as form_of_address or video_interests.
+    merge_op: immutable
+  - name: content
+    type: string
+    description: Confirmed preference with source channel, timestamp and public/private visibility. Preserve provenance on merge.
+    merge_op: patch

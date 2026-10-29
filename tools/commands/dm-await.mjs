@@ -19,7 +19,7 @@ function acknowledge(state,message) {
   return {...state,owner,lastSeen:message.ts,lastKey:message.key,lastKeys:[...new Set([...(same?(state.lastKeys??(state.lastKey?[state.lastKey]:[])):[]),message.key])],pending:undefined,queue:state.queue??[],at:new Date().toISOString()}
 }
 function emit(message){
-  try { recordDmMemory({owner,role:'user',content:message.text,createdAt:Number(message.ts)*1000,key:message.key}) }
+  try { recordDmMemory({owner,name,role:'user',content:message.text,createdAt:Number(message.ts)*1000,key:message.key}) }
   catch(e) { console.error('私信记忆本地记录失败：'+e.message) }
   console.log(json?JSON.stringify(message):'DM_HIT mid='+owner+' text='+message.text)
 }

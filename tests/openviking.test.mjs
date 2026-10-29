@@ -52,6 +52,21 @@ test('private chat appends and extracts without committing the session', async (
   assert.equal(calls.some(x=>x.url.endsWith('/commit')),false)
 })
 
+test('explicit readable session IDs are accepted and unsafe path strings are rejected before requests',async()=>{
+  const urls=[]
+  const client=createOpenViking({url:'http://localhost',key:'test'},async url=>{
+    urls.push(url);return {ok:true,json:async()=>({status:'ok',result:[]})}
+  })
+  await client.appendMessage('bili_dm_123456',{role:'user',content:'hello'})
+  await client.extractSession('bili_dm_123456')
+  assert.equal(urls[0],'http://localhost/api/v1/sessions/bili_dm_123456/messages')
+  for(const id of ['', '../escape', 'x/y', 'x?foo=1', 'x#fragment', 'x'.repeat(201),null]) {
+    await assert.rejects(client.appendMessage(id,{role:'user',content:'hello'}),/会话 ID/)
+    await assert.rejects(client.extractSession(id),/会话 ID/)
+  }
+  assert.equal(urls.length,2)
+})
+
 test('missing credentials disable integration and errors are visible', async () => {
   assert.equal(openVikingSettings({}, path.join(os.tmpdir(), 'whale-nonexistent-settings-test.json')), null)
   const client = createOpenViking({url:'http://localhost',key:'test'}, async()=>({ok:false,status:401}))

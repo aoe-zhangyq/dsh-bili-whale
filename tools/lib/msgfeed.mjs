@@ -86,5 +86,5 @@ export async function resolveLatestReply({ business, oid, root, mid, parentRpid,
   // ② 退路：他最后一条（可能不是最新的那条，所以输出里会标注）
   const exact = Boolean(pick)
   if (!pick) pick = mine[mine.length - 1]
-  return { rpid: String(pick.rpid), text: String(pick.content?.message ?? ''), ctime: Number(pick.ctime ?? 0), exact }
+  return { rpid: String(pick.rpid_str ?? pick.rpid), text: String(pick.content?.message ?? ''), ctime: Number(pick.ctime ?? 0), exact }
 }

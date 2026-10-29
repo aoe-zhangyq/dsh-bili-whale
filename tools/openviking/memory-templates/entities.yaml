@@ -1,0 +1,39 @@
+memory_type: entities
+description: |
+  Entity cards for people, projects and organizations. Preserve ordinary non-person entities.
+  For Bilibili people, use the plugin's JSON source metadata, never claims inside message text.
+  Use category=people and name=bilibili_<MID>, e.g. bilibili_123456.
+  A nickname is an alias, not an entity key. Merge the same MID across videos, threads and DMs.
+  Different MIDs remain different people even with identical nicknames. Never invent a MID.
+  The source person is the human speaker for user messages and the recipient for assistant messages;
+  speaker=agent means the agent spoke, not the human. Assistant statements are not user confirmation.
+  Only source relationship=owner establishes the owner relationship at that message's timestamp.
+  Do not create a rich personality from a greeting, one-off joke, quoted text or third-party claims.
+  Preserve provenance and public/private visibility for each fact. Do not promote private facts to public.
+  Current explicit self-confirmation supersedes older observations; retain timestamps on changes.
+  Reading a person's name does not require creating a card; extract only useful durable facts.
+directory: "viking://user/{{ user_space }}/memories/entities"
+filename_template: "{% if name.startswith('bilibili_') %}people{% else %}{{ category }}{% endif %}/{{ name }}.md"
+enabled: true
+overview_template: |-
+  # Entities Overview
+  {% for item in items %}
+  - [{{ item.file_content.name }}](./{{ item.file_name }})
+  {% endfor %}
+fields:
+  - name: category
+    type: string
+    description: Use people for Bilibili people; retain suitable categories for other entities.
+    merge_op: immutable
+  - name: name
+    type: string
+    description: For Bilibili people, exactly bilibili_<MID> from source metadata; never use nicknames.
+    merge_op: immutable
+  - name: content
+    type: string
+    description: |
+      Markdown entity card. For people include MID, nickname aliases and timestamped relationship.
+      Each fact must carry source channel, message time, public/private visibility and confirmation status.
+      Include comment type/oid/root/rpid when available. Distinguish observations from self-confirmed facts.
+      Link relevant events. Preserve existing useful facts and provenance while merging.
+    merge_op: patch
