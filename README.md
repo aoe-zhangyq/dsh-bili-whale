@@ -1,6 +1,6 @@
 # dsh-bili-whale 0.4.6
 
-OpenViking 记忆接入与 Windows 配置见 [OPENVIKING.md](OPENVIKING.md)；两本本地日记继续保留。
+OpenViking 人工配置与排障见 [OPENVIKING.md](OPENVIKING.md)；大肥鱼日常操作见[记忆运行手册](tools/docs/memory-runtime.md)。会话提示会提供可直接执行的绝对工具入口，两本本地日记继续保留。
 
 > 2026-10-25 扫码增补版：在最新 BUG 修复版上加入「设置 → 养鱼 → B 站登录 → 扫码登录」。使用与验证说明见 [QR-LOGIN-2026-10-25.md](QR-LOGIN-2026-10-25.md)。
 
