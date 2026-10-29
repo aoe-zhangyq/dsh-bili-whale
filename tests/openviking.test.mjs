@@ -17,7 +17,7 @@ test('OpenViking recall is scoped and commit returns a background task', async (
   assert.equal(JSON.parse(calls[0].options.body).target_uri, undefined)
   const stored = await client.store('主人喜欢猫')
   assert.equal(stored.taskId, 'task-1')
-  assert.equal(JSON.parse(calls[1].options.body).content, '主人喜欢猫')
+  assert.ok(JSON.parse(calls[1].options.body).content.endsWith('主人喜欢猫'))
   assert.match(calls[2].url, /\/commit$/)
   assert.equal(calls[0].options.headers['X-API-Key'], 'test')
 })
@@ -31,8 +31,9 @@ test('store preserves original roles and timestamps, and validates before writin
   const messages=[{role:'user',content:'我喜欢猫',created_at:'2026-10-18T10:00:00+08:00'},{role:'assistant',content:'记住了'}]
   const result=await client.store(messages)
   assert.equal(result.taskId,'x')
-  assert.deepEqual(calls[0].body,messages[0])
-  assert.deepEqual(calls[1].body,messages[1])
+  assert.equal(calls[0].body.role,'user');assert.ok(calls[0].body.content.endsWith(messages[0].content))
+  assert.equal(Date.parse(calls[0].body.created_at),Date.parse(messages[0].created_at))
+  assert.equal(calls[1].body.role,'assistant');assert.ok(calls[1].body.content.endsWith(messages[1].content))
   assert.match(calls[2].url,/commit$/)
   const count=calls.length
   await assert.rejects(client.store([{role:'user',content:'x',created_at:'yesterday'}]),/消息时间/)

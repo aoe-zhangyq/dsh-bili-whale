@@ -19,12 +19,13 @@ function setup(t) {
   const flush=()=>flushDmMemory({home,settings,now,client})
   return {home, calls,add,flush,advance:ms=>{time+=ms},client}
 }
-test('私信逐条追加，同一会话在安静后整体提取，未新增时不重复提取',async t=>{
+test('私信逐条追加，安静后只提取一次并封存，后续消息不重放旧批次',async t=>{
   const b=setup(t); assert.equal(b.add('user','我喜欢海','1'),true); assert.equal(b.add('user','我喜欢海','1'),false)
   await b.flush(); assert.equal(b.calls.length,1); assert.equal(b.calls[0].m.role,'user'); assert.match(b.calls[0].m.content,/2026-10-29T10:00:00.000Z/)
   b.advance(1000); b.add('assistant','我记住了','2'); await b.flush(); assert.equal(b.calls[0].id,b.calls[1].id)
   b.advance(300000); await b.flush(); assert.equal(b.calls[2].type,'extract'); await b.flush(); assert.equal(b.calls.length,3)
-  b.add('user','也喜欢鱼','3'); await b.flush(); b.advance(300000); await b.flush(); assert.equal(b.calls.at(-1).id,b.calls[0].id)
+  b.add('user','也喜欢鱼','3'); await b.flush(); b.advance(300000); await b.flush(); assert.notEqual(b.calls.at(-1).id,b.calls[0].id)
+  assert.equal(b.calls.filter(x=>x.type==='extract' && x.id===b.calls[0].id).length,1)
 })
 test('七天和长度分别轮换会话，旧会话先提取',async t=>{
   const b=setup(t); b.add('user','x','1'); await b.flush(); b.advance(7*86400000); b.add('assistant','y','2'); await b.flush()
@@ -94,7 +95,7 @@ test('legacy comment de-duplication and reply grouping survive upgrade',async t=
   assert.equal(recordOwnerComment({...base,id:'111',content:'旧评论'},opts),false)
   assert.equal(recordCommentReply({...base,parent:'111',id:'222',content:'升级后的回复'},opts),true)
   await flushDmMemory({...opts,channel:'comment',client:b.client})
-  assert.equal(b.calls[0].id,oldId)
+  assert.notEqual(b.calls[0].id,oldId)
   assert.equal(sourceOf(b.calls[0]).person.entity,'bilibili_123')
 })
 

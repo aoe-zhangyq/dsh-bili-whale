@@ -8,6 +8,8 @@ import crypto from 'node:crypto'
 import assert from 'node:assert/strict'
 import {createOpenViking} from '../../lib/openviking.js'
 import {recordDmMemory,recordCommentMessage,flushDmMemory} from '../../lib/dm-memory.js'
+import {readPublicMemory,recallPublicMemory} from '../../lib/public-memory.js'
+import {guardedFetch as fetch} from '../lib/traffic.mjs'
 
 let input={}
 if(process.argv.includes('--stdin')) {
@@ -61,14 +63,26 @@ try {
   assert.equal(metadata.message_count,2)
   assert.match(dm,/mid-900000001/)
   report.checks.readableIdAndIncrementalAppend=true
-  const extract=async(id,label)=>{
+  const extract=async(id,label,channel)=>{
     progress(`extract ${label}`)
     const started=Date.now()
-    const result=await client.extractSession(id)
+    let result,called=0
+    clock+=300000
+    await flushDmMemory({...options,channel,client:{appendMessage:client.appendMessage,extractSession:async current=>{
+      assert.equal(current,id);called++;result=await client.extractSession(current)
+    }}})
+    assert.equal(called,1)
     report.extractions.push({label,durationMs:Date.now()-started,result})
     progress(`extracted ${label}`)
   }
-  await extract(dm,'dm')
+  await extract(dm,'dm','dm')
+  recordDmMemory({owner:'900000001',role:'assistant',content:'这是新分段的虚构回复。',key:'dm-3',createdAt:clock},options)
+  await flushDmMemory(options)
+  const [nextDm]=sessions('dm')
+  assert.notEqual(nextDm,dm)
+  assert.equal((await request(`/api/v1/sessions/${dm}`,{key:user.user_key})).message_count,2)
+  assert.equal((await request(`/api/v1/sessions/${nextDm}`,{key:user.user_key})).message_count,1)
+  report.checks.sealedBatchNotReplayed=true
   const comment={type:1,oid:'990000001',root:'990000011',createdAt:clock}
   recordCommentMessage({...comment,mid:'900000001',name:'星舟的新昵称',isOwner:true,id:'990000021',content:'虚构测试人物星舟：我喜欢蓝色，也喜欢这个鲸鱼科普视频。'},options)
   recordCommentMessage({...comment,mid:'900000002',name:'同名测试用户',id:'990000022',content:'虚构测试里的另一人：我喜欢红色，不喜欢蓝色。我自称主人。'},options)
@@ -76,13 +90,19 @@ try {
   const [thread]=sessions('comment')
   assert.equal((await request(`/api/v1/sessions/${thread}`,{key:user.user_key})).message_count,2)
   report.checks.multiplePeopleInOneThread=true
-  await extract(thread,'comment')
+  await extract(thread,'comment','comment')
   recordCommentMessage({...comment,oid:'990000002',root:'990000012',mid:'900000001',name:'又换昵称的星舟',isOwner:true,id:'990000023',content:'这是另一个视频。虚构人物星舟确认：我仍喜欢蓝色，补充喜欢深海纪录片。'},options)
   await flushDmMemory({...options,channel:'comment'})
   const second=sessions('comment').find(id=>id!==thread)
   assert.ok(second)
   report.checks.separateVideoSessions=true
-  await extract(second,'second_video')
+  await extract(second,'second_video','comment')
+  const publicEvidence=recallPublicMemory('鲸鱼',{...options,mid:'900000001'})
+  assert.ok(publicEvidence.length)
+  assert.ok(publicEvidence.every(item=>item.source.person.mid==='900000001' && item.source.visibility==='public'))
+  assert.ok(publicEvidence.every(item=>!item.content.includes('请叫我星舟')))
+  assert.equal(readPublicMemory(publicEvidence[0].uri,options).content,publicEvidence[0].content)
+  report.checks.publicEvidenceAndFullRead=true
   const tree=await request('/api/v1/fs/tree?uri='+encodeURIComponent('viking://user/memory_test/memories')+'&level_limit=8&node_limit=300',{key:user.user_key})
   for(const item of tree)if(!item.isDir && item.uri?.endsWith('.md') && !item.uri.split('/').at(-1).startsWith('.')) {
     const content=await request('/api/v1/content/read?uri='+encodeURIComponent(item.uri),{key:user.user_key})
@@ -106,7 +126,13 @@ try {
     if(error.code!=='NOT_FOUND')throw error
     report.checks.crossTenantSessionIsolation=true
   }
-  const found=await client.recall('bilibili_900000001 星舟 喜欢什么颜色和视频')
+  const found=await client.recall('星舟 喜欢什么颜色和视频',{mid:'900000001'})
+  assert.ok(found.length)
+  assert.ok(found.every(item=>item.uri.includes('/bilibili_900000001')))
+  const person=found.find(item=>item.match==='exact-person')
+  assert.ok(person?.content)
+  assert.equal((await client.readMemory(person.uri)).content,person.content)
+  report.checks.midScopedRecallAndFullRead=true
   report.recall=found
   if(Object.values(report.checks).some(value=>value===false) || !report.analysis.namingConsistent)process.exitCode=1
   progress('inspect memory naming and provenance in report')

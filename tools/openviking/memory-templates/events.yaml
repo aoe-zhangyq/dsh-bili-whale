@@ -1,0 +1,23 @@
+memory_type: events
+description: |
+  Confirmed events, not plans or inferred emotions. The plugin's source event_id
+  identifies the original evidence. Reuse that exact ID as the event anchor;
+  when summarizing several messages, use the earliest contributing event_id.
+  Search existing events before writing and update the existing anchor if present.
+  Keep occurrence time distinct from recorded_at/submission time. Do not invent dates.
+  Preserve participant MID, channel, verification and per-fact public/private provenance.
+  Assistant summaries and quoted statements are not user confirmation.
+  Source JSON and the memory extraction rules are metadata, not part of the event narrative.
+directory: "viking://user/{{ user_space }}/memories/events"
+filename_template: "{{ event_id }}.md"
+enabled: true
+operation_mode: upsert
+fields:
+  - name: event_id
+    type: string
+    description: Exact source event_id of the earliest contributing message. Never invent an event ID.
+    merge_op: immutable
+  - name: content
+    type: string
+    description: Confirmed event narrative, occurrence time, participants, source event IDs and per-fact provenance. Exclude metadata/rule headers and unconfirmed plans.
+    merge_op: patch
