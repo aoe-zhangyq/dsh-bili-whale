@@ -39,6 +39,19 @@ test('store preserves original roles and timestamps, and validates before writin
   assert.equal(calls.length,count)
 })
 
+test('private chat appends and extracts without committing the session', async () => {
+  const calls=[]
+  const client=createOpenViking({url:'http://localhost',key:'test'},async (url,options)=>{
+    calls.push({url,options}); return {ok:true,json:async()=>({status:'ok',result:[]})}
+  })
+  const id='whale-dm-12345678-abcd'
+  await client.appendMessage(id,{role:'user',content:'hello',created_at:'2026-10-29T10:00:00Z'})
+  await client.extractSession(id)
+  assert.match(calls[0].url,/\/messages$/); assert.match(calls[1].url,/\/extract$/)
+  assert.equal(JSON.parse(calls[0].options.body).role,'user')
+  assert.equal(calls.some(x=>x.url.endsWith('/commit')),false)
+})
+
 test('missing credentials disable integration and errors are visible', async () => {
   assert.equal(openVikingSettings({}, path.join(os.tmpdir(), 'whale-nonexistent-settings-test.json')), null)
   const client = createOpenViking({url:'http://localhost',key:'test'}, async()=>({ok:false,status:401}))

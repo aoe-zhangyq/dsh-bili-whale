@@ -18,6 +18,7 @@ import crypto from 'node:crypto'
 import { config } from '../lib/config.mjs'
 import { validateShare } from '../lib/share-policy.mjs'
 import { gate, record } from '../lib/quota-gate.mjs'
+import { recordDmMemory } from '../../lib/dm-memory.js'
 
 // 稳定的设备 ID：只生成一次，之后永远复用 ✓
 //   · 存在 ~/.bili-ai/dev_id（0600）
@@ -220,6 +221,8 @@ if (SHARE) {
 if (DRY) { console.log('  [dry] 预检通过，未发送 ✓ 正式发送时会重新检查额度'); process.exit(0) }
 const r = await send(ONLY_TO, MSG)
 if (r.code === 0) {
+  try { recordDmMemory({ owner: ONLY_TO, role: 'assistant', content: MSG, createdAt: Date.now(), key: crypto.randomUUID() }) }
+  catch (e) { console.error('私信已发送，但记忆本地记录失败：' + e.message) }
   saveQ({ date: today(), count: used + 1, mid: ONLY_TO, at: new Date().toISOString() })
   if (SHARE) record({ type: 'dm', target: SHARE_TARGET, note: MSG.slice(0, 40), auto: true, share: true })
   console.log(`  ✓ 已发送（HTTP ${r.http}）${SHARE ? ' · 已记入分享额度 ✓' : ' · 推送不占额度 ✓'}`)
