@@ -23,6 +23,27 @@ test('identical in-flight reads share one request and independent response bodie
  assert.equal(s.calls(),1)
  for(const r of results)assert.equal((await r.json()).code,0)
 })
+
+test('request timeout overrides survive through body consumption and preserve caller cancellation',async t=>{
+ const s=setup(t), timeouts=[], signals=[]
+ const original=AbortSignal.timeout
+ t.mock.method(AbortSignal,'timeout',ms=>{timeouts.push(ms);return original(60000)})
+ const guard=createTrafficGuard({...s.options,transport:async(_input,options)=>{
+  assert.equal(options.timeoutMs,undefined)
+  signals.push(options.signal)
+  return new Response(new ReadableStream({start(controller){
+   options.signal.addEventListener('abort',()=>controller.error(options.signal.reason),{once:true})
+  }}))
+ }})
+ await guard.fetch('https://api.bilibili.com/default')
+ const controller=new AbortController()
+ const response=await guard.fetch('https://api.bilibili.com/video',{timeoutMs:600000,signal:controller.signal})
+ const body=response.arrayBuffer()
+ controller.abort(new Error('cancel download'))
+ await assert.rejects(body,/cancel download/)
+ assert.deepEqual(timeouts,[30000,600000])
+ assert.equal(signals[1].aborted,true)
+})
 test('cross-process and cross-instance budgets survive restarts',async t=>{
  const s=setup(t,{readHourly:2})
  await s.guard.fetch('https://api.bilibili.com/x/one')

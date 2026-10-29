@@ -48,14 +48,25 @@ const stamp = new Date().toISOString().replace(/[:.]/g, '-')
 const mp4 = path.join(outDir, `${bvid}-${stamp}.mp4`)
 const sheet = path.join(outDir, `${bvid}-${stamp}-${cols}x${rows}.jpg`)
 
-const r = await fetch(url, { headers: { 'user-agent': UA, referer: 'https://www.bilibili.com/', range: 'bytes=0-' } })
+// 下载和写盘共用十分钟期限；普通 API 请求仍使用默认的 30 秒。
+const downloadTimeoutMs = 600_000
+const downloadSignal = AbortSignal.timeout(downloadTimeoutMs)
+const r = await fetch(url, { timeoutMs: downloadTimeoutMs, signal: downloadSignal, headers: { 'user-agent': UA, referer: 'https://www.bilibili.com/', range: 'bytes=0-' } })
 if (!r.ok) { console.error(`下载失败 HTTP ${r.status}`); process.exit(5) }
 // 2026-10-21 修（外部审计 #6）：原来是 Buffer.from(await r.arrayBuffer()) ——
 //   一条两小时 720p 视频就是 1–2GB 内存峰值 ✗ 改成流式写盘，内存占用恒定 ✓
 if (!r.body) { console.error('下载失败：响应没有 body'); process.exit(5) }
 const { pipeline } = await import('node:stream/promises')
 const { Readable } = await import('node:stream')
-await pipeline(Readable.fromWeb(r.body), fs.createWriteStream(mp4))
+try {
+  await pipeline(Readable.fromWeb(r.body), fs.createWriteStream(mp4), { signal: downloadSignal })
+  downloadSignal.throwIfAborted()
+  const expectedBytes = r.headers.get('content-length')
+  if (expectedBytes !== null && fs.statSync(mp4).size !== Number(expectedBytes)) throw new Error('响应长度不符，视频下载不完整')
+} catch (e) {
+  fs.rmSync(mp4, { force: true })
+  console.error('下载失败：' + e.message); process.exit(5)
+}
 console.log(`已下载: ${mp4}  (${(fs.statSync(mp4).size / 1024 / 1024).toFixed(2)} MB)`)
 
 // ── 取帧方式：优先"画面变化点"，不够再退回等间隔（2026-10-14 参考 K3 的做法）
@@ -109,10 +120,10 @@ fs.mkdirSync(tmp, { recursive: true })
 try {
   times.forEach((t, i) => {
     execFileSync(FFMPEG, ['-y', '-loglevel', 'error', '-ss', t.toFixed(2), '-i', mp4,
-      '-frames:v', '1', '-q:v', '2', path.join(tmp, `f${String(i).padStart(2, '0')}.jpg`)], { stdio: 'inherit' })
+      '-frames:v', '1', '-pix_fmt', 'yuvj420p', '-q:v', '2', path.join(tmp, `f${String(i).padStart(2, '0')}.jpg`)], { stdio: 'inherit' })
   })
   execFileSync(FFMPEG, ['-y', '-loglevel', 'error', '-i', path.join(tmp, 'f%02d.jpg'), '-vf',
-    `scale=${TILE}:-1,tile=${cols}x${rows}`, '-frames:v', '1', sheet], { stdio: 'inherit' })
+    `scale=${TILE}:-1,tile=${cols}x${rows}`, '-frames:v', '1', '-pix_fmt', 'yuvj420p', sheet], { stdio: 'inherit' })
   if (!fs.existsSync(sheet)) throw new Error('九宫格没生成')
   console.log(`\nSHEET: ${sheet}`)
 } catch (e) {
@@ -125,7 +136,7 @@ try {
 const subs = path.join(outDir, `${bvid}-${stamp}-subs.jpg`)
 try {
   execFileSync(FFMPEG, ['-y', '-loglevel', 'error', '-i', path.join(tmp, 'f%02d.jpg'), '-vf',
-    `crop=iw:ih*0.17:0:ih*0.83,scale=1280:-1,tile=1x${N}`, '-frames:v', '1', subs], { stdio: 'inherit' })
+    `crop=iw:ih*0.17:0:ih*0.83,scale=1280:-1,tile=1x${N}`, '-frames:v', '1', '-pix_fmt', 'yuvj420p', subs], { stdio: 'inherit' })
   if (fs.existsSync(subs)) console.log(`SUBS:  ${subs}\n（同一批帧的底部字幕带，竖排 ${N} 条）`)
 } catch {
   console.log('（字幕条版生成失败，忽略——不影响 SHEET）')

@@ -89,8 +89,14 @@ export function createTrafficGuard({ directory, transport = (...a) => globalThis
     return digest(url.origin + url.pathname + ':' + value)
   }
   async function guarded(input, options = {}) {
+    const { timeoutMs = 30000, ...fetchOptions } = options
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new RangeError('timeoutMs must be a positive safe integer')
     const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url)
-    if (!isBili(url)) return transport(input, options)
+    if (!isBili(url)) {
+      if (options.timeoutMs === undefined) return transport(input, fetchOptions)
+      const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs)
+      return transport(input, { ...fetchOptions, signal })
+    }
     const headers = options.headers ?? input.headers ?? {}, account = identity(headers)
     const method = String(options.method ?? input.method ?? 'GET').toUpperCase()
     const writing = !['GET','HEAD','OPTIONS'].includes(method)
@@ -146,16 +152,16 @@ export function createTrafficGuard({ directory, transport = (...a) => globalThis
             if(!dead) return 100
           }
           const remaining = Math.max(0, Number(s.lastDispatch ?? 0)+cfg.minGapMs-now())
-          if (!remaining) { s.lastDispatch=now();s.active={token:requestToken,pid:process.pid,until:now()+35000} }
+          if (!remaining) { s.lastDispatch=now();s.active={token:requestToken,pid:process.pid,until:now()+timeoutMs+5000} }
           return remaining
         })
         if (!wait) break
         await sleep(wait)
         options.signal?.throwIfAborted()
       }
-      const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000)
+      const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs)
       dispatched = true
-      const response = await transport(input, { ...options, signal })
+      const response = await transport(input, { ...fetchOptions, signal })
       let payload
       if ((response.headers?.get('content-type') ?? '').includes('json')) {
         try { payload = await response.clone().json() } catch {}
@@ -195,7 +201,7 @@ export function createTrafficGuard({ directory, transport = (...a) => globalThis
     fetch: (input, options={}) => {
       const url=new URL(typeof input==='string'||input instanceof URL ? input : input.url)
       if (!isBili(url) || String(options.method??input.method??'GET').toUpperCase()!=='GET' || options.signal) return guarded(input,options)
-      const key=identity(options.headers??input.headers??{})+':'+url.href
+      const key=identity(options.headers??input.headers??{})+':'+url.href+':'+(options.timeoutMs??30000)
       if(!inflight.has(key)) inflight.set(key,guarded(input,options).finally(()=>inflight.delete(key)))
       return inflight.get(key).then(r=>r.clone())
     },
