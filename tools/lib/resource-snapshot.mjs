@@ -100,9 +100,13 @@ export async function rebuildResourceSnapshot({client,settings,home=DSH_HOME,doc
       await client.removeSnapshot(old.previous)
       const cleaned={...old};delete cleaned.previous;savePointer(home,cleaned);delete old.previous
     }
-    const age=old?now()-old.createdAt:0
+    const age=old?now()-(old.checkedAt??old.createdAt):0
     if(onlyIfDue&&old&&age>=0&&age<intervalDays*DAY)return {status:'not_due',createdAt:old.createdAt,root:old.root}
     const source=collectResourceFiles({home,docsDir})
+    if(onlyIfDue && old && old.sourceDigest===source.digest) {
+      old.checkedAt=now();savePointer(home,old)
+      return {status:'unchanged',createdAt:old.createdAt,checkedAt:old.checkedAt,root:old.root}
+    }
     // Capture once. Changes after this point belong to the next scheduled build;
     // rejecting them after a long import can starve an actively used diary.
     if(collectResourceFiles({home,docsDir}).digest!==source.digest)throw Error('采集资源时本地文件正在变化，请稍后重建')

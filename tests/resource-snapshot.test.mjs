@@ -71,7 +71,9 @@ test('configured interval limits model work and still rebuilds the complete snap
     clock+=6*DAY;const weekly=await rebuildResourceSnapshot({...x,client,onlyIfDue:true,now:()=>clock})
     assert.equal(weekly.status,'rebuilt');assert.equal(imports,2)
     clock+=DAY
-    assert.equal((await rebuildResourceSnapshot({...x,client,onlyIfDue:true,intervalDays:1,now:()=>clock})).status,'rebuilt');assert.equal(imports,3)
+    assert.equal((await rebuildResourceSnapshot({...x,client,onlyIfDue:true,intervalDays:1,now:()=>clock})).status,'unchanged');assert.equal(imports,2)
+    assert.equal((await rebuildResourceSnapshot({...x,client,onlyIfDue:true,intervalDays:1,now:()=>clock})).status,'not_due')
+    assert.equal((await rebuildResourceSnapshot({...x,client,now:()=>clock})).status,'rebuilt');assert.equal(imports,3)
     await assert.rejects(rebuildResourceSnapshot({...x,client,intervalDays:0,now:()=>clock}),/1 至 365/)
   } finally {remove(x)}
 })

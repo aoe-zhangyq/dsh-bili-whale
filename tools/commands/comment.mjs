@@ -14,6 +14,7 @@ import { guardedFetch as fetch } from '../lib/traffic.mjs'
 //          exact request, prints nothing postable. No write to bilibili.
 // --go   : the same, then POSTs exactly once and prints the API result.
 import fs from 'node:fs'
+import { recordCommentReply } from '../../lib/dm-memory.js'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync } from '../lib/capture.mjs'
@@ -338,6 +339,8 @@ console.log(`  HTTP ${res.status}`)
 console.log(`  code=${out.code} message=${out.message ?? ''}`)
 if (out.code === 0) {
   const rpid = out.data?.rpid_str ?? out.data?.rpid
+  try { recordCommentReply({owner:String(config().owner?.mid ?? ''),type,oid,root,parent,id:rpid,content:message,createdAt:Date.now()}) }
+  catch(e) { console.error('评论已发送，但记忆本地记录失败：'+e.message) }
   console.log(`  ✅ 已发布，评论 rpid=${rpid}`)
   // once-per-person：记一笔"回过谁"，下次判重用
   // 2026-10-22：主人不进 replied.json —— 否则回他一条就把他锁 30 天 ✗

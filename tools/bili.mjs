@@ -31,7 +31,7 @@ const map = {
   selftest: ['commands/selftest.mjs', '启动测试（装完先跑这个）：配置/凭据/登录态/目录/ffmpeg + 下一步两件事（未分组会话 · 完全权限）'],
   deps: ['commands/deps.mjs', '依赖体检（装完先跑它）：cookie / ffmpeg / Node / 数据目录；--json 给 agent 判断'],
   diary: ['commands/diary.mjs', '日记：show / log / tail / sync / status / find / read'],
-  memory: ['commands/memory.mjs', 'OpenViking 记忆：recall <查询> / store <UTF-8 文件> / task <任务 ID>'],
+  memory: ['commands/memory.mjs', 'OpenViking 记忆：recall <查询> / store <文件> / experience <文件> / task <任务 ID>'],
   resource: ['commands/resource.mjs', '资源快照：rebuild / refresh / status / find <查询>'],
   'video-card': ['commands/video-card.mjs', '视频资料卡：save <JSON 文件> / sync [BV] / find <查询> / read <BV>'],
   notify: ['commands/notify.mjs', '通知分发：把"自主发言后必须报备"落到代码里（后端 stdout/file/webhook/command，由 config.notify 决定）'],

@@ -104,3 +104,19 @@ test('memory outage does not prevent delivery or remove diary instruction', asyn
     fs.rmSync(dir,{recursive:true,force:true})
   }
 })
+
+test('delivery searches the supplied conversation instead of the instruction prompt', async () => {
+  const previous=process.env.WHALE_OPENVIKING_API_KEY, original=globalThis.fetch
+  process.env.WHALE_OPENVIKING_API_KEY='test'
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'whale-query-'));let query
+  globalThis.fetch=async (_url,options)=>{query=JSON.parse(options.body).query;return {ok:true,json:async()=>({status:'ok',result:{memories:[]}})}}
+  try {
+    const delivery=createSessionDelivery({controller:{create:async()=>{},prompt:async()=>{}},dshHome:dir,cwd:dir,sessionId:'test',config:()=>({}),persona:()=>''})
+    await delivery.send({content:[{type:'text',text:'漫长的操作说明'}]},undefined,{recallQuery:'我喜欢鲸鱼'})
+    assert.equal(query,'我喜欢鲸鱼')
+  } finally {
+    globalThis.fetch=original
+    if(previous===undefined)delete process.env.WHALE_OPENVIKING_API_KEY;else process.env.WHALE_OPENVIKING_API_KEY=previous
+    fs.rmSync(dir,{recursive:true,force:true})
+  }
+})
