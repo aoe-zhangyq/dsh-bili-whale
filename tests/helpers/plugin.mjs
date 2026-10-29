@@ -44,6 +44,11 @@ if(process.env.TEST_NO_NODE) {
   assert.equal(sessionSettings.data.config.personaOncePerSession,true)
   assert.equal((await request('settings',{sessionRotateDays:-1})).status,400)
   assert.equal((await request('settings',{personaOncePerSession:'false'})).status,400)
+  const resourceSettings=await request('settings',{resourceRebuildDays:14})
+  assert.equal(resourceSettings.status,200)
+  assert.equal(resourceSettings.data.config.resourceRebuildDays,14)
+  assert.equal((await request('settings',{resourceRebuildDays:0})).status,400)
+  assert.equal((await request('settings',{resourceRebuildDays:1.5})).status,400)
   const text='测试人设：使用简洁句子。'
   assert.equal((await request('persona',{text})).status,200)
   assert.equal((await request('persona',{},'GET')).data.text,text)

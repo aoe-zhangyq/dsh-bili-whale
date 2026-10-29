@@ -14,12 +14,29 @@ test('OpenViking recall is scoped and commit returns a background task', async (
     return {ok:true, json:async()=>({status:'ok',result})}
   })
   assert.equal((await client.recall('喜好'))[0].abstract, '喜欢猫')
-  assert.equal(JSON.parse(calls[0].options.body).target_uri, 'viking://~/memories')
+  assert.equal(JSON.parse(calls[0].options.body).target_uri, undefined)
   const stored = await client.store('主人喜欢猫')
   assert.equal(stored.taskId, 'task-1')
   assert.equal(JSON.parse(calls[1].options.body).content, '主人喜欢猫')
   assert.match(calls[2].url, /\/commit$/)
   assert.equal(calls[0].options.headers['X-API-Key'], 'test')
+})
+
+test('store preserves original roles and timestamps, and validates before writing', async () => {
+  const calls=[]
+  const client=createOpenViking({url:'http://localhost',key:'test'},async (url,options)=>{
+    calls.push({url,body:options.body === undefined ? undefined : JSON.parse(options.body)})
+    return {ok:true,json:async()=>({status:'ok',result:url.endsWith('commit')?{task_id:'x'}:{}})}
+  })
+  const messages=[{role:'user',content:'我喜欢猫',created_at:'2026-10-18T10:00:00+08:00'},{role:'assistant',content:'记住了'}]
+  const result=await client.store(messages)
+  assert.equal(result.taskId,'x')
+  assert.deepEqual(calls[0].body,messages[0])
+  assert.deepEqual(calls[1].body,messages[1])
+  assert.match(calls[2].url,/commit$/)
+  const count=calls.length
+  await assert.rejects(client.store([{role:'user',content:'x',created_at:'yesterday'}]),/消息时间/)
+  assert.equal(calls.length,count)
 })
 
 test('missing credentials disable integration and errors are visible', async () => {
@@ -66,6 +83,7 @@ test('memory outage does not prevent delivery or remove diary instruction', asyn
     await delivery.send({content:[{type:'text',text:'hello'}]})
     assert.match(sent.content[0].text,/OpenViking 暂不可用/)
     assert.match(sent.content[0].text,/whale-diary/)
+    assert.match(sent.content[0].text,/video-card save/)
   } finally {
     globalThis.fetch=original
     if(previous===undefined) delete process.env.WHALE_OPENVIKING_API_KEY; else process.env.WHALE_OPENVIKING_API_KEY=previous

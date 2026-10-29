@@ -10,7 +10,8 @@ try {
     console.log(JSON.stringify(await client.recall(args.join(' ')), null, 2))
   } else if (command === 'store' && args.length === 1) {
     const text = fs.readFileSync(args[0], 'utf8')
-    const result = await client.store(text)
+    const input = /\.json$/i.test(args[0]) ? JSON.parse(text.replace(/^\uFEFF/, '')) : text
+    const result = await client.store(input)
     console.log(JSON.stringify({ ...result, message: '已提交；记忆提取在后台进行，请用 memory task 查询结果。' }))
   } else if (command === 'task' && args.length === 1) {
     console.log(JSON.stringify(await client.task(args[0]), null, 2))

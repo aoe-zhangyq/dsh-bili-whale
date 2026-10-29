@@ -90,6 +90,13 @@ test('write routes apply the same trust rule', async () => {
   assert.equal((await request(untrusted, 'settings', { host: 'evil.example:3080', method: 'POST', body: { sessionRotateDays: 3 } })).status, 403)
 })
 
+test('OpenViking settings reject untrusted or unauthenticated requests', async () => {
+  const body={enabled:true,url:'http://127.0.0.1:1933',account:'tester',user:'cs_1',key:'test-key'}
+  assert.equal((await request(mount({isTrusted:()=>false,requestRejection:()=>undefined}),'openviking',{host:'evil.example',method:'POST',body})).status,403)
+  assert.equal((await request(mount({isTrusted:()=>true,requestRejection:()=>401}),'openviking',{host:'127.0.0.1',method:'POST',body})).status,401)
+  assert.equal((await request(mount(undefined),'openviking',{host:'127.0.0.1',method:'POST',body})).status,503)
+})
+
 test('QR routes enforce trust, host authentication and POST before running login', async () => {
   for (const name of ['start', 'poll', 'cancel']) {
     const route = 'auth/qr/' + name
