@@ -1,3 +1,4 @@
+import { videoSegments, downloadVideo } from '../lib/watch-download.mjs'
 import { watchOptions } from '../lib/watch-options.mjs'
 import { guardedFetch as fetch } from '../lib/traffic.mjs'
 import { apiGet } from '../lib/bili-api.mjs'
@@ -38,8 +39,10 @@ console.log(`UP: ${owner}   时长: ${duration}s   cid=${cid}`)
 // 画质实测（2026-10-14）：html5 + qn=32 会被压到 360p（返回 quality=16，界面小字全糊）；
 // 改 platform=pc + qn=80 可拿到 720p（返回 quality=64），依旧是普通 mp4 直链，不必碰 dash。
 const p = await apiGet(`https://api.bilibili.com/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=80&fnval=1&platform=pc&high_quality=1`, H)
-const url = p.data?.durl?.[0]?.url
-if (!url) { console.error(`没拿到直链（code=${p.code} ${p.message ?? ""}）——有些视频要登录或只有 dash 流`); process.exit(4) }
+let segments
+try { segments = videoSegments(p.data, duration) }
+catch (e) { console.error(`playurl 失败：${e.message}（code=${p.code}）`); process.exit(4) }
+console.log(`视频分段: ${segments.length}`)
 const QN = { 16: '360P', 32: '480P', 64: '720P', 80: '1080P' }
 console.log(`实际画质: ${QN[p.data.quality] ?? p.data.quality}`)
 
@@ -48,23 +51,10 @@ const stamp = new Date().toISOString().replace(/[:.]/g, '-')
 const mp4 = path.join(outDir, `${bvid}-${stamp}.mp4`)
 const sheet = path.join(outDir, `${bvid}-${stamp}-${cols}x${rows}.jpg`)
 
-// 下载和写盘共用十分钟期限；普通 API 请求仍使用默认的 30 秒。
-const downloadTimeoutMs = 600_000
-const downloadSignal = AbortSignal.timeout(downloadTimeoutMs)
-const r = await fetch(url, { timeoutMs: downloadTimeoutMs, signal: downloadSignal, headers: { 'user-agent': UA, referer: 'https://www.bilibili.com/', range: 'bytes=0-' } })
-if (!r.ok) { console.error(`下载失败 HTTP ${r.status}`); process.exit(5) }
-// 2026-10-21 修（外部审计 #6）：原来是 Buffer.from(await r.arrayBuffer()) ——
-//   一条两小时 720p 视频就是 1–2GB 内存峰值 ✗ 改成流式写盘，内存占用恒定 ✓
-if (!r.body) { console.error('下载失败：响应没有 body'); process.exit(5) }
-const { pipeline } = await import('node:stream/promises')
-const { Readable } = await import('node:stream')
 try {
-  await pipeline(Readable.fromWeb(r.body), fs.createWriteStream(mp4), { signal: downloadSignal })
-  downloadSignal.throwIfAborted()
-  const expectedBytes = r.headers.get('content-length')
-  if (expectedBytes !== null && fs.statSync(mp4).size !== Number(expectedBytes)) throw new Error('响应长度不符，视频下载不完整')
+  await downloadVideo({ segments, output: mp4, fetch, ffmpeg: FFMPEG, execFileSync,
+    headers: { 'user-agent': UA, referer: 'https://www.bilibili.com/', range: 'bytes=0-' } })
 } catch (e) {
-  fs.rmSync(mp4, { force: true })
   console.error('下载失败：' + e.message); process.exit(5)
 }
 console.log(`已下载: ${mp4}  (${(fs.statSync(mp4).size / 1024 / 1024).toFixed(2)} MB)`)
@@ -121,6 +111,8 @@ try {
   times.forEach((t, i) => {
     execFileSync(FFMPEG, ['-y', '-loglevel', 'error', '-ss', t.toFixed(2), '-i', mp4,
       '-frames:v', '1', '-pix_fmt', 'yuvj420p', '-q:v', '2', path.join(tmp, `f${String(i).padStart(2, '0')}.jpg`)], { stdio: 'inherit' })
+    const frame = path.join(tmp, `f${String(i).padStart(2, '0')}.jpg`)
+    if (!fs.existsSync(frame) || !fs.statSync(frame).size) throw new Error(`时间点 ${t.toFixed(2)}s 没有生成帧，视频可能不完整`)
   })
   execFileSync(FFMPEG, ['-y', '-loglevel', 'error', '-i', path.join(tmp, 'f%02d.jpg'), '-vf',
     `scale=${TILE}:-1,tile=${cols}x${rows}`, '-frames:v', '1', '-pix_fmt', 'yuvj420p', sheet], { stdio: 'inherit' })
