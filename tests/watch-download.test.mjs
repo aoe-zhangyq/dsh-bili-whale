@@ -4,6 +4,25 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { videoSegments, downloadVideo } from '../tools/lib/watch-download.mjs'
+import { watchOptions, videoPage } from '../tools/lib/watch-options.mjs'
+
+test('multipart video selects matching cid and duration instead of combined duration', () => {
+  const data = { cid: 11, duration: 814, pages: [
+    { cid: 11, duration: 202 }, { cid: 22, duration: 203 },
+    { cid: 33, duration: 204 }, { cid: 44, duration: 205 },
+  ] }
+  assert.deepEqual(videoPage(data), { cid: 11, duration: 202, page: 1, total: 4 })
+  const options = watchOptions(['--page', '2', 'BVtest'], 'out')
+  assert.equal(options.bvid, 'BVtest')
+  assert.deepEqual(videoPage(data, options.page), { cid: 22, duration: 203, page: 2, total: 4 })
+  assert.equal(watchOptions(['BVtest', '--page=4'], 'out').page, 4)
+  assert.equal(videoSegments({ durl: [{ url: 'P1', length: 202000 }] }, videoPage(data).duration).length, 1)
+  assert.throws(() => videoPage(data, 5), /超出范围/)
+  for (const value of ['', '0', '-1', '1.5', 'NaN', undefined]) {
+    assert.throws(() => watchOptions(['BVtest', '--page', value ?? '--uniform'], 'out'), /正整数/)
+  }
+  assert.deepEqual(videoPage({ cid: 99, duration: 208 }), { cid: 99, duration: 208, page: 1, total: 1 })
+})
 
 test('all playurl segments are ordered; first-segment-only responses fail explicitly', () => {
   const first = { order: 1, url: 'first', length: 115000 }

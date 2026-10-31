@@ -1,10 +1,10 @@
 import { videoSegments, downloadVideo } from '../lib/watch-download.mjs'
-import { watchOptions } from '../lib/watch-options.mjs'
+import { watchOptions, videoPage } from '../lib/watch-options.mjs'
 import { guardedFetch as fetch } from '../lib/traffic.mjs'
 import { apiGet } from '../lib/bili-api.mjs'
 // 让 agent 真"看"视频：取直链 → 下载 → ffmpeg 抽帧拼成一张九宫格 → 输出图片路径（再交给 read_image 看）
 //
-// 用法: node bili-watch.mjs <BV号> [列x行，默认 3x3] [outDir]
+// 用法: node bili-watch.mjs <BV号> [列x行，默认 3x3] [outDir] [--page N，默认 1]
 //   例: node bili-watch.mjs BV1iLYm6VET3            → 3x3 九宫格
 //       node bili-watch.mjs BV1iLYm6VET3 4x4        → 16 格，看得更细
 //
@@ -21,7 +21,7 @@ try { FFMPEG = requireFfmpeg() } catch (e) { console.error(String(e.message)); p
 let parsed
 try { parsed = watchOptions(process.argv.slice(2), dshPath('shots','video')) } catch(e) { console.error(e.message); process.exit(2) }
 const {bvid,grid,outDir,tile:TILE} = parsed
-if (!bvid) { console.error('用法: node bili-watch.mjs <BV号> [列x行] [outDir]'); process.exit(2) }
+if (!bvid) { console.error('用法: node bili-watch.mjs <BV号> [列x行] [outDir] [--page N]'); process.exit(2) }
 const [cols, rows] = grid.split('x').map(Number)
 if (!cols || !rows) { console.error('格子格式应是 3x3 这样'); process.exit(2) }
 const N = cols * rows
@@ -32,8 +32,13 @@ const H = { 'user-agent': UA, referer: 'https://www.bilibili.com/', cookie: `SES
 
 const view = await apiGet(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, H)
 if (view.code !== 0) { console.error(`view 失败 code=${view.code} ${view.message}`); process.exit(3) }
-const { cid, title, duration, owner } = { ...view.data, owner: view.data.owner?.name }
+let selectedPage
+try { selectedPage = videoPage(view.data, parsed.page) }
+catch (e) { console.error(e.message); process.exit(2) }
+const { cid, duration } = selectedPage
+const { title, owner } = { ...view.data, owner: view.data.owner?.name }
 console.log(`标题: ${title}`)
+if (selectedPage.total > 1) console.log(`多P: 共 ${selectedPage.total} P，本次取 P${selectedPage.page}`)
 console.log(`UP: ${owner}   时长: ${duration}s   cid=${cid}`)
 
 // 画质实测（2026-10-14）：html5 + qn=32 会被压到 360p（返回 quality=16，界面小字全糊）；

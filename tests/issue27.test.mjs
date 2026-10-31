@@ -60,7 +60,7 @@ test('invalid state is reported without overwriting it',t=>{
   assert.throws(f.make,/会话状态损坏/);assert.equal(fs.readFileSync(path.join(f.dir,'whale-session.json'),'utf8'),'broken')
 })
 test('tile options do not consume positional output directory; invalid widths rejected',()=>{
-  assert.deepEqual(watchOptions(['BVtest','--tile','800','4x4','out'],'default'),{bvid:'BVtest',grid:'4x4',outDir:'out',tile:800})
+  assert.deepEqual(watchOptions(['BVtest','--tile','800','4x4','out'],'default'),{bvid:'BVtest',grid:'4x4',outDir:'out',tile:800,page:1})
   assert.equal(watchOptions(['BVtest','--tile=1280'],'default').tile,1280)
   assert.equal(watchOptions(['BVtest'],'default').tile,720)
   for(const v of ['','NaN','239','1281','720.5'])assert.throws(()=>watchOptions(['BVtest','--tile='+v],'default'))

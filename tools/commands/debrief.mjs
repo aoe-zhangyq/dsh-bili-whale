@@ -1,8 +1,9 @@
 import { guardedFetch as fetch } from '../lib/traffic.mjs'
 import { apiGet } from '../lib/bili-api.mjs'
+import { pageNumber, videoPage } from '../lib/watch-options.mjs'
 // 「看懂视频」一条龙：封面 + 简介 + 官方字幕 + 弹幕热区 + 热评 + 画面抽帧，六路齐出。
 //
-// 用法: node debrief.mjs <BV> [--bucket 30] [--top 5] [--grid 3x3] [--no-frames] [--substrip 每N秒] [--comments 8]
+// 用法: node debrief.mjs <BV> [--page N] [--bucket 30] [--top 5] [--grid 3x3] [--no-frames] [--substrip 每N秒] [--comments 8]
 // 产出: 终端摘要 + 封面图 + 字幕 TXT + 弹幕对齐表 + 九宫格/字幕带（后三者交给 read_image / 模型合成）
 //
 // 设计（2026-10-14，主人定义为「看懂视频」大模块）：
@@ -25,12 +26,18 @@ import { NODE_EXE } from '../lib/nodebin.mjs'   // 2026-10-21：别用 process.e
 
 
 const argv = process.argv.slice(2)
-const bvid = argv.find((a) => !a.startsWith('--'))
-if (!bvid) { console.error('用法: node debrief.mjs <BV> [--bucket 30] [--top 5] [--grid 3x3] [--no-frames]'); process.exit(2) }
+const bvid = argv.find((a) => /^BV[0-9A-Za-z]+$/.test(a))
+if (!bvid) { console.error('用法: node debrief.mjs <BV> [--page N] [--bucket 30] [--top 5] [--grid 3x3] [--no-frames]'); process.exit(2) }
 const opt = {}
 for (let i = 0; i < argv.length; i += 1) {
-  if (argv[i].startsWith('--')) opt[argv[i].slice(2)] = argv[i + 1]?.startsWith('--') ? true : argv[++i] ?? true
+  if (argv[i].startsWith('--')) {
+    const [key, ...value] = argv[i].slice(2).split('=')
+    opt[key] = value.length ? value.join('=') : argv[i + 1]?.startsWith('--') ? true : argv[++i] ?? true
+  }
 }
+let PAGE
+try { PAGE = pageNumber(opt.page ?? 1) }
+catch (e) { console.error(e.message); process.exit(2) }
 const BUCKET = Number(opt.bucket ?? 30)
 const TOP = Number(opt.top ?? 5)
 const GRID = String(opt.grid ?? '3x3')
@@ -81,10 +88,15 @@ fs.mkdirSync(path.join(shots, 'subs'), { recursive: true })
 // ── ① 元信息 ──
 const view = await jget(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`)
 if (view.code !== 0) { console.error(`view 失败 code=${view.code} ${view.message}`); process.exit(3) }
-const d = view.data, cid = d.cid, aid = d.aid, dur = d.duration
+const d = view.data, aid = d.aid
+let selectedPage
+try { selectedPage = videoPage(d, PAGE) }
+catch (e) { console.error(e.message); process.exit(2) }
+const { cid, duration: dur } = selectedPage
+const durationLabel = selectedPage.total > 1 ? `${fmt(dur)}（P${PAGE}/${selectedPage.total}，全片合计 ${fmt(d.duration)}）` : fmt(dur)
 console.log('══════════ ① 元信息（它自称是什么）══════════')
 console.log(`标题: ${d.title}`)
-console.log(`UP: ${d.owner.name}   时长: ${fmt(dur)}   分区: ${d.tname || '-'}   发布: ${new Date(d.pubdate * 1000).toLocaleDateString('zh-CN')}`)
+console.log(`UP: ${d.owner.name}   时长: ${durationLabel}   分区: ${d.tname || '-'}   发布: ${new Date(d.pubdate * 1000).toLocaleDateString('zh-CN')}`)
 console.log(`播放 ${d.stat.view}  点赞 ${d.stat.like}  收藏 ${d.stat.favorite}  投币 ${d.stat.coin}  弹幕 ${d.stat.danmaku}  评论 ${d.stat.reply}`)
 if (d.desc) console.log(`简介: ${d.desc.replace(/\n+/g, ' / ').slice(0, 300)}`)
 
@@ -105,7 +117,7 @@ if (subs.length) {
   const r = await fetch(url, { headers: { 'user-agent': UA, referer: `https://www.bilibili.com/video/${bvid}/` } })
   if (r.ok) { try { body = (JSON.parse(await r.text()).body ?? []) } catch {} }
 }
-const subFile = path.join(shots, 'subs', `${bvid}-debrief.txt`)
+const subFile = path.join(shots, 'subs', `${bvid}${selectedPage.total > 1 ? `-P${PAGE}` : ''}-debrief.txt`)
 console.log('\n══════════ ③ 官方字幕（它到底说了什么）══════════')
 if (body.length) {
   fs.writeFileSync(subFile, body.map((l) => `[${fmt(l.from)}] ${l.content}`).join('\n'))
@@ -218,7 +230,7 @@ if (!opt['no-frames']) {
     //   capture 的默认超时是 120s，而「场景检测空跑 + 下载 + 抽帧」按时长线性长 ✗
     //   改成按时长算：120s + 每秒视频 1.5s（25 分钟 → 约 40 分钟余量 ✓）
     const framesTimeout = 120_000 + Math.round((Number(dur ?? 0) || 0) * 1.5) * 1000
-    const out = execFileSync(NODE_EXE, [watch, bvid, GRID, ...(opt.tile !== undefined ? ['--tile', String(opt.tile)] : [])], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: framesTimeout })
+    const out = execFileSync(NODE_EXE, [watch, bvid, GRID, '--page', String(PAGE), ...(opt.tile !== undefined ? ['--tile', String(opt.tile)] : [])], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: framesTimeout })
     for (const line of out.split('\n')) if (/^(SHEET|SUBS|实际画质|取帧方式)/.test(line)) console.log(line)
     sheet = (out.split('\n').find((l) => l.startsWith('SHEET:')) || '').slice(6).trim() || null
   } catch (e) { console.log(`（抽帧失败：${String(e.message).slice(0, 200)}）`) }
