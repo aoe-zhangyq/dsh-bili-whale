@@ -9,7 +9,7 @@ export function watchOptions(args,defaultDir) {
     } else if(arg==='--page'||arg.startsWith('--page=')) {
       page=pageNumber(arg==='--page'?args[++i]:arg.slice(7))
     } else if(!arg.startsWith('--'))positional.push(arg)
-    else if(arg!=='--uniform')throw Error('未知抽帧选项：'+arg)
+    else if(arg!=='--uniform'&&arg!=='--local')throw Error('未知抽帧选项：'+arg)
   }
   return {bvid:positional[0],grid:(positional[1]??'3x3').toLowerCase(),outDir:positional[2]??defaultDir,tile,page}
 }
