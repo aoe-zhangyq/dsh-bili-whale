@@ -52,14 +52,17 @@ test('killed real CLI releases lock; concurrent CLI fails without touching state
  const b=box(t);b.put(page([row(1,1000)]));b.save({owner:'222',lastSeen:900})
  const before=fs.readFileSync(b.state,'utf8'),ready=path.join(b.home,'ready'),preload=path.join(b.home,'hang.mjs')
  fs.writeFileSync(preload,`import fs from 'node:fs';globalThis.fetch=()=>{fs.writeFileSync(${JSON.stringify(ready)},'ready');return new Promise(()=>{setInterval(()=>{},1000)})}`)
- const child=spawn(process.execPath,[path.join(root,'tools/commands/dm-await.mjs'),'--peek','--json'],{env:{...b.env,NODE_OPTIONS:'--import='+pathToFileURL(preload)},stdio:'ignore'})
- t.after(()=>{if(child.exitCode===null)child.kill('SIGKILL')})
+ const child=spawn(process.execPath,[path.join(root,'tools/commands/dm-await.mjs'),'--peek','--json'],{env:{...b.env,NODE_OPTIONS:'--import='+pathToFileURL(preload)},stdio:['ignore','ignore','pipe']})
+ let stderr='',exit
+ child.stderr.setEncoding('utf8').on('data',chunk=>{stderr+=chunk})
+ const exited=new Promise(resolve=>child.once('close',(code,signal)=>{exit={code,signal};resolve()}))
+ t.after(async()=>{if(!exit)child.kill('SIGKILL');await exited})
  const deadline=Date.now()+10000
- while(!fs.existsSync(ready)&&Date.now()<deadline)await new Promise(r=>setTimeout(r,25))
- assert.ok(fs.existsSync(ready),'child reached network under lock')
+ while(!exit&&!fs.existsSync(ready)&&Date.now()<deadline)await new Promise(r=>setTimeout(r,25))
+ assert.ok(fs.existsSync(ready),`child did not reach network under lock (${JSON.stringify(exit ?? 'timeout')}): ${stderr}`)
  const concurrent=b.run('--peek');assert.equal(concurrent.status,3);assert.match(concurrent.stderr,/锁不可用/)
  assert.equal(fs.readFileSync(b.state,'utf8'),before)
- const exited=new Promise(r=>child.once('exit',r));child.kill('SIGKILL');await exited
+ child.kill('SIGKILL');await exited
  fs.writeFileSync(b.state+'.lock','')
  const hit=b.peek();assert.equal(hit.key,'1');assert.equal(b.run('--ack',hit.receipt).status,0)
  assert.equal(b.run('--peek').status,1)

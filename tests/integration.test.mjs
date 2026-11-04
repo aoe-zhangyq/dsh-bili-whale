@@ -9,7 +9,7 @@ import {fileURLToPath,pathToFileURL} from 'node:url'
 const root=fileURLToPath(new URL('../',import.meta.url))
 function sandbox(t,cfg={}) {
   const home=fs.mkdtempSync(path.join(os.tmpdir(),'bili-whale-test-'))
-  t.after(()=>fs.rmSync(home,{recursive:true,force:true}))
+  t.after(()=>fs.rmSync(home,{recursive:true,force:true,maxRetries:3,retryDelay:50}))
   const dsh=path.join(home,'portable/profile')
   fs.mkdirSync(dsh,{recursive:true});fs.mkdirSync(path.join(home,'.bili-ai'))
   fs.writeFileSync(path.join(dsh,'bili-whale.config.json'),JSON.stringify({owner:{mid:'222',name:'Owner'},listen:{comment:false,dm:false,live:false},...cfg}))

@@ -11,7 +11,9 @@ export function probeRuntime(file, env) {
     const proof = path.join(dir, 'proof')
     const r = spawnSync(file, ['-e', 'require("fs").writeFileSync(process.argv[1],process.versions.node)', proof],
       { env, stdio: 'ignore', windowsHide: true, timeout: 10000 })
-    return !r.error && r.status === 0 && /^\d+\./.test(fs.readFileSync(proof, 'utf8'))
+    if (r.error || r.status !== 0) return false
+    const version = /^(\d+)\./.exec(fs.readFileSync(proof, 'utf8'))
+    return version !== null && Number(version[1]) >= 18
   } catch { return false }
   finally { if (dir) fs.rmSync(dir, { recursive: true, force: true }) }
 }
@@ -38,5 +40,5 @@ export function resolveRuntime(dshHome, options = {}) {
     const nodeEnv = { ...env, ELECTRON_RUN_AS_NODE: '1' }
     if (probe(current, nodeEnv)) return { file: current, env: nodeEnv }
   }
-  throw Error('[bili-whale] 找不到可执行脚本的 node 运行时，请设置 DSH_NODE 为真实 node 的绝对路径')
+  throw Error('[bili-whale] 找不到可执行脚本的 Node.js 18+ 运行时，请设置 DSH_NODE 为 node 可执行文件的绝对路径')
 }

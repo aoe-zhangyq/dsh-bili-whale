@@ -17,6 +17,7 @@ whale-diary*.md
 shots/
 out/
 node_modules/
+/.test-artifacts/
 *.mp4
 *.jpg
 *.png

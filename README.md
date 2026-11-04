@@ -160,7 +160,9 @@ OpenViking 人工配置与排障见 [OPENVIKING.md](OPENVIKING.md)；大肥鱼�
 
 ## 装
 
-**前提**：Node 18+；**ffmpeg**（看画面要用，见下）。
+**前提**：建议新安装使用 [Node.js v26.12.1](https://nodejs.org/dist/v26.12.1/) 或更新的 26.x 维护版本。工具链最低要求 Node.js 18。看画面还需要 **ffmpeg**（见下）。
+
+DSH 可能优先使用宿主提供的 Node。升级后可在「设置 → 养鱼 → 依赖体检」确认插件实际使用的版本。如需指定安装的 Node，可在启动 DSH 前将 `DSH_NODE` 设为该可执行文件的绝对路径，再重启 DSH。
 
 ```bash
 # 1) 装插件（本地目录 / npm 都行）
