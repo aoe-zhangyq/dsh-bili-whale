@@ -37,7 +37,16 @@ test('default resource collection includes the runtime guide and excludes human 
 test('delivery teaches the runtime guide once per boot, retains a usable entry each time, and omits human deployment context',async t=>{
   const home=fs.mkdtempSync(path.join(os.tmpdir(),'whale-context-'));t.after(()=>fs.rmSync(home,{recursive:true,force:true}))
   const previousFetch=globalThis.fetch;let prompts=[]
-  globalThis.fetch=async()=>({ok:true,json:async()=>({status:'ok',result:{memories:[]}})})
+  let searches=0
+  const root='viking://user/whale/memories/events'
+  globalThis.fetch=async()=>{
+    const memories=[
+      {uri:`${root}/.overview.md`,abstract:'directory metadata',score:0.9},
+      ...(searches++===0?[{uri:`${root}/weak.md`,abstract:'weak match',score:0.201}]:
+        [0.4,0.6,0.7,0.8].map(score=>({uri:`${root}/${score}.md`,abstract:'event',score}))),
+    ]
+    return {ok:true,json:async()=>({status:'ok',result:{memories}})}
+  }
   fs.writeFileSync(path.join(home,'whale-openviking.json'),JSON.stringify({url:'http://localhost:1933',key:'test'}))
   const options={controller:{create:async()=>{},prompt:async request=>prompts.push(request.content[0].text)},
     dshHome:home,cwd:home,sessionId:'test',config:()=>({personaOncePerSession:true}),persona:()=>'',nodeExe:process.execPath}
@@ -46,6 +55,9 @@ test('delivery teaches the runtime guide once per boot, retains a usable entry e
     await delivery.send({content:[{type:'text',text:'first task'}]})
     await delivery.send({content:[{type:'text',text:'next task'}]})
     assert.match(prompts[0],/先读运行手册/);assert.ok(prompts[0].includes(memoryRuntimeGuide))
+    assert.doesNotMatch(prompts[0],/OpenViking 回忆|directory metadata|weak match/)
+    const matches=JSON.parse(prompts[1].split('\n').find(line=>line.startsWith('[{"uri"')))
+    assert.deepEqual(matches.map(item=>item.score),[0.8,0.7,0.6])
     assert.doesNotMatch(prompts[1],/先读运行手册/)
     for(const text of prompts) {
       assert.match(text,/【运行入口】/);assert.ok(text.includes(process.execPath))
@@ -53,5 +65,8 @@ test('delivery teaches the runtime guide once per boot, retains a usable entry e
     }
     await createSessionDelivery(options).send({content:[{type:'text',text:'restarted task'}]})
     assert.match(prompts[2],/先读运行手册/)
+    await delivery.send({content:[{type:'text',text:'diary only'}]},undefined,{recallQuery:null})
+    assert.equal(searches,3)
+    assert.doesNotMatch(prompts[3],/OpenViking 回忆/)
   } finally {globalThis.fetch=previousFetch}
 })
