@@ -8,6 +8,8 @@ description: |
   Preserve participant MID, channel, verification and per-fact public/private provenance.
   Assistant summaries and quoted statements are not user confirmation.
   Source JSON and the memory extraction rules are metadata, not part of the event narrative.
+  A DSH session may contain many people and repeated extraction of the same evidence.
+  Reuse source event_id anchors and preserve private visibility when merging repeated evidence.
 directory: "viking://user/{{ user_space }}/memories/events"
 filename_template: "{{ event_id }}.md"
 enabled: true

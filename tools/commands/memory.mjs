@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import { createOpenViking, openVikingSettings } from '../../lib/openviking.js'
-import { recordExperience } from '../../lib/dm-memory.js'
+import { recordExperience, queueDshMemoryExtraction, retryMemoryExtraction } from '../../lib/dm-memory.js'
 import {readPublicMemory,recallPublicMemory} from '../../lib/public-memory.js'
 import {config} from '../lib/config.mjs'
 
@@ -19,8 +19,8 @@ try {
     else args.push(rawArgs[i])
   }
   if(!['private','public'].includes(flags.audience))throw Error('audience 须为 private 或 public')
-  if(command==='read' && flags.mid!==undefined)throw Error('read 使用明确 URI；--mid 仅用于 recall')
-  if(!['recall','read'].includes(command) && (flags.mid!==undefined || flags.audience!=='private'))throw Error('身份与查询范围参数仅用于 recall/read')
+  if(command!=='recall' && flags.mid!==undefined)throw Error('--mid 仅用于 recall')
+  if(!['recall','read','extract'].includes(command) && (flags.mid!==undefined || flags.audience!=='private'))throw Error('身份与查询范围参数仅用于 recall/read/extract')
   if (command === 'recall' && args.length) {
     const result=flags.audience==='public'?recallPublicMemory(args.join(' '),{settings,...flags}):await client.recall(args.join(' '),flags)
     console.log(JSON.stringify(result, null, 2))
@@ -32,6 +32,10 @@ try {
     const input = /\.json$/i.test(args[0]) ? JSON.parse(text.replace(/^\uFEFF/, '')) : text
     const result = await client.store(input,{ownerMid:config().owner?.mid})
     console.log(JSON.stringify({ ...result, message: '已提交；记忆提取在后台进行，请用 memory task 查询结果。' }))
+  } else if (command === 'extract' && args.length <= 1) {
+    const task=args.length?retryMemoryExtraction(args[0],{settings}):queueDshMemoryExtraction({settings,audience:flags.audience})
+    console.log(JSON.stringify({...task,
+      message:'提取任务已持久化，插件后台异步执行。'}))
   } else if (command === 'experience' && args.length === 1) {
     const text = fs.readFileSync(args[0], 'utf8').replace(/^\uFEFF/, '').trim()
     const input=/\.json$/i.test(args[0])?JSON.parse(text):text
@@ -39,7 +43,7 @@ try {
     console.log(queued?'经历已记录到本地待处理队列；插件运行时会合并提取。':'该 event_id 已记录，未重复提交。')
   } else if (command === 'task' && args.length === 1) {
     console.log(JSON.stringify(await client.task(args[0]), null, 2))
-  } else throw Error('用法：memory recall <查询> [--mid MID] [--audience private|public] | read <URI> [--audience private|public] | store <UTF-8 文件路径> | experience <UTF-8 文本或 JSON 文件> | task <任务 ID>')
+  } else throw Error('用法：memory recall <查询> [--mid MID] [--audience private|public] | read <URI> [--audience private|public] | extract [本地提取任务ID] [--audience private|public] | store <UTF-8 文件路径> | experience <UTF-8 文本或 JSON 文件> | task <任务 ID>')
 } catch (e) {
   console.error('记忆操作失败：' + e.message)
   process.exitCode = 1

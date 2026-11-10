@@ -68,16 +68,16 @@ test('public lookup reads only retained platform comments, including sent events
   assert.throws(()=>recallPublicMemory('鲸鱼',{...options,mid:'../123'}),/MID/)
 })
 
-test('failed extraction is sealed durably, survives restart, and never receives the next batch',async t=>{
+test('failed extraction is not retried while idle; new messages reuse the session after restart',async t=>{
   const options=setup(t);let clock=at,calls=[]
-  const opts={...options,now:()=>clock,client:{appendMessage:async(id,message)=>calls.push({type:'append',id,message}),extractSession:async id=>{calls.push({type:'extract',id});throw Error('lost response')}}}
+  const opts={...options,extractIdle:true,now:()=>clock,client:{appendMessage:async(id,message)=>calls.push({type:'append',id,message}),extractSession:async id=>{calls.push({type:'extract',id});throw Error('lost response')}}}
   recordDmMemory({owner:'123',role:'user',content:'first',key:'first',createdAt:clock},opts)
   await flushDmMemory(opts);clock+=300000;await flushDmMemory(opts);await flushDmMemory(opts)
   recordDmMemory({owner:'123',role:'user',content:'second',key:'second',createdAt:clock},opts)
   await flushDmMemory({...opts});clock+=300000;await flushDmMemory(opts)
-  assert.notEqual(calls[0].id,calls[2].id)
-  assert.equal(calls.filter(call=>call.type==='extract' && call.id===calls[0].id).length,1)
-  assert.equal(calls.filter(call=>call.type==='append' && call.id===calls[0].id).length,1)
+  assert.equal(calls[0].id,calls[2].id)
+  assert.equal(calls.filter(call=>call.type==='extract' && call.id===calls[0].id).length,2)
+  assert.equal(calls.filter(call=>call.type==='append' && call.id===calls[0].id).length,2)
 })
 
 test('MID recall reads exact full identity then searches only that MID preferences and rejects stray results',async()=>{

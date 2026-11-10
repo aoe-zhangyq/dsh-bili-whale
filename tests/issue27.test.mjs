@@ -7,6 +7,7 @@ import {spawnSync} from 'node:child_process'
 import {fileURLToPath} from 'node:url'
 import {createSessionDelivery} from '../lib/session-delivery.js'
 import {watchOptions} from '../tools/lib/watch-options.mjs'
+import {recordDmMemory,flushMemoryExtractions} from '../lib/dm-memory.js'
 
 function fixture(t,cfg={}) {
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'whale-27-'))
@@ -18,10 +19,10 @@ function fixture(t,cfg={}) {
   const request={content:[{type:'text',text:'TASK'}]}
   return {dir,args,sent,created,request,make:()=>createSessionDelivery(args),advance:n=>time+=n,persona:s=>block=s,busy:b=>busy=b,fail:b=>fail=b,createFail:b=>createFail=b}
 }
-test('defaults repeat persona and do not create session state',async t=>{
+test('defaults repeat persona and persist the DSH session for memory attribution',async t=>{
   const f=fixture(t),d=f.make();await d.send(f.request);await d.send(f.request)
   assert.equal(f.sent.length,2);assert.ok(f.sent.every(r=>r.content[0].text.includes('PERSONA-A')))
-  assert.equal(fs.existsSync(path.join(f.dir,'whale-session.json')),false)
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir,'whale-session.json'),'utf8')).id,'bili-whale')
 })
 test('failed delivery retries persona; concurrent channels inject only once; edits reinject',async t=>{
   const f=fixture(t,{personaOncePerSession:true}),d=f.make();f.fail(true)
@@ -54,6 +55,37 @@ test('rotation creation failure does not commit a new session; aborted queue doe
   await assert.rejects(d.send(f.request),/create failed/)
   assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir,'whale-session.json'))).id,'bili-whale')
   const abort=new AbortController();abort.abort();await assert.rejects(d.send(f.request,abort.signal));assert.equal(f.sent.length,1)
+})
+
+test('rotation persists the old OV extraction task before creating the new DSH and does not wait for the slow extraction',async t=>{
+  const f=fixture(t,{sessionRotateDays:1}),settings={url:'http://localhost:1933',account:'test',user:'whale',key:'test'}
+  fs.writeFileSync(path.join(f.dir,'whale-openviking.json'),JSON.stringify(settings))
+  const operations=[],create=f.args.controller.create
+  f.args.controller.create=async request=>{
+    if (f.created.length) assert.equal(fs.readdirSync(path.join(f.dir,'whale-memory-extractions')).length,1)
+    operations.push('create');return create(request)
+  }
+  let failExtract=true
+  t.mock.method(globalThis,'fetch',async (url,options)=>{
+    if(url.endsWith('/messages'))operations.push('append')
+    if(url.endsWith('/extract')) {
+      operations.push('extract')
+      if(failExtract)throw Error('OV offline')
+    }
+    return {ok:true,json:async()=>({status:'ok',result:url.includes('/search/find')?{memories:[]}:[]})}
+  })
+  const delivery=f.make();await delivery.send(f.request)
+  operations.length=0
+  recordDmMemory({owner:'123',role:'user',content:'actual DM',key:'1',createdAt:Date.now()},{home:f.dir,settings})
+  f.advance(86400001)
+  await delivery.send(f.request)
+  assert.deepEqual(operations,['create'])
+  assert.equal(f.created.length,2);assert.equal(f.sent.length,2)
+  await flushMemoryExtractions({home:f.dir,settings})
+  assert.deepEqual(operations,['create','append','extract'])
+  const task=JSON.parse(fs.readFileSync(path.join(f.dir,'whale-memory-extractions',fs.readdirSync(path.join(f.dir,'whale-memory-extractions'))[0]),'utf8'))
+  assert.equal(task.status,'failed');assert.equal(task.dshSessionId,'bili-whale')
+  assert.notEqual(f.sent.at(-1).sessionId,'bili-whale')
 })
 test('invalid state is reported without overwriting it',t=>{
   const f=fixture(t);fs.writeFileSync(path.join(f.dir,'whale-session.json'),'broken')

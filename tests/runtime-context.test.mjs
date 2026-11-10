@@ -8,12 +8,13 @@ import {createSessionDelivery} from '../lib/session-delivery.js'
 import {collectResourceFiles} from '../tools/lib/resource-snapshot.mjs'
 
 test('runtime entry binds absolute executable, CLI and data home without leaking unrelated environment values',()=>{
-  const text=runtimeContext({dshHome:"D:\\Fish Home\\O'Brien",cwd:'D:\\Work',biliMjs:'D:\\Plugin\\bili.mjs',nodeExe:'D:\\Node\\node.exe',
+  const text=runtimeContext({dshHome:"D:\\Fish Home\\O'Brien",cwd:'D:\\Work',dshSessionId:'fish-session',biliMjs:'D:\\Plugin\\bili.mjs',nodeExe:'D:\\Node\\node.exe',
     runtimeEnv:{ELECTRON_RUN_AS_NODE:'1',OV_ROOT_KEY:'test-secret'},platform:'win32'})
   assert.match(text,/\$env:DSH_HOME='D:\\Fish Home\\O''Brien'/)
   assert.match(text,/\$env:ELECTRON_RUN_AS_NODE='1'/)
   assert.match(text,/& 'D:\\Node\\node.exe'/)
   assert.match(text,/不要假定工作目录里有 bili.mjs/)
+  assert.match(text,/WHALE_DSH_SESSION_ID='fish-session'/)
   assert.doesNotMatch(text,/test-secret|OV_ROOT_KEY/)
 })
 

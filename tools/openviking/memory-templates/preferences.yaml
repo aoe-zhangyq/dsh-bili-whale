@@ -3,6 +3,7 @@ description: |
   Durable preferences explicitly expressed or confirmed by the person who owns the preference.
   For Bilibili messages identify that person by bilibili_<MID> from source metadata.
   Nicknames and session IDs are not person keys. Merge the same person's same topic across channels.
+  Use bilibili_<MID> as the preference user key, never the OpenViking login user.
   A user message's source person is its author; an assistant message's source person is the recipient.
   Assistant suggestions, jokes, quotes and third-party descriptions are not preference confirmation.
   Store one independently updatable topic per file. A preferred form of address is one such topic.

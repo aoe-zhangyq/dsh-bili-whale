@@ -11,6 +11,8 @@
 
 ## 私下查询
 
+切换 DSH 会话前，先提交本轮值得保留的真实经历，再执行 `node bili.mjs memory extract`，确认任务已入队后即可切换。公开会话使用 `node bili.mjs memory extract --audience public`。该命令快速持久化任务，插件后台异步追加旧会话的待处理消息并提取记忆，切换过程无需等待提取完成。日常轮询只追加消息；重复入队且没有新消息时，后台会跳过已确认的提取。后台失败会记录任务 ID，核查后可用 `memory extract <本地提取任务ID>` 重排旧任务，无需切回旧 DSH 会话。
+
 ```text
 node bili.mjs memory recall "喜欢什么视频" --mid 123456
 node bili.mjs memory recall "上次讨论过的鲸鱼视频"
