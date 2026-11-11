@@ -13,13 +13,13 @@ try {
     if(args.length) readLocalVideoCard(args[0])
     const settings = openVikingSettings()
     if (!settings) throw Error('OpenViking 未启用；本地资料卡仍保留')
-    const result = await rebuildResourceSnapshot({settings,client:createOpenViking(settings)})
+    const result = await rebuildResourceSnapshot({settings,client:createOpenViking(settings),scope:'videos'})
     console.log(JSON.stringify(result))
   } else if (command === 'find' && args.length) {
     const settings = openVikingSettings()
     if (!settings) throw Error('OpenViking 未启用')
     const client=createOpenViking(settings)
-    const result=await withActiveSnapshot({settings},async snapshot=>{
+    const result=await withActiveSnapshot({settings,scope:'videos'},async snapshot=>{
       const found=await client.searchSnapshot(snapshot.root,args.join(' '),'videos'),output=[],seen=new Set()
       for(const item of found){const bvid=item.uri.match(/\/videos\/(BV[0-9A-Za-z]{10})(?:\/|\.md$)/)?.[1];if(!bvid||seen.has(bvid))continue;try {output.push({...item,bvid,abstract:readLocalVideoCard(bvid).markdown.slice(0,1600)});seen.add(bvid)}catch(e){if(e.code!=='ENOENT')throw e}}
       return {createdAt:new Date(snapshot.createdAt).toISOString(),items:output}

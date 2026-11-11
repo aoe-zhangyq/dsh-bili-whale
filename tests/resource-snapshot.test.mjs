@@ -21,6 +21,32 @@ function setup() {
 }
 const remove=x=>fs.rmSync(x.home,{recursive:true,force:true})
 
+test('manual, diary and video snapshots refresh independently',async()=>{
+  const x=setup(),videoDir=path.join(x.home,'whale-video-cards')
+  fs.mkdirSync(videoDir)
+  fs.writeFileSync(path.join(videoDir,'BV1234567890.md'),'# 视频卡')
+  let scope='manuals',imports=0
+  const client={
+    async importSnapshot(){imports++},
+    async snapshotTree(root){return collectResourceFiles({...x,scope}).entries.map(entry=>({uri:root+'/'+entry.name}))},
+    async removeSnapshot(){},
+  }
+  const build=()=>rebuildResourceSnapshot({...x,scope,client})
+  try {
+    const manual=await build()
+    scope='videos';const video=await build()
+    scope='diary';await build()
+    fs.writeFileSync(path.join(x.home,'whale-diary-private.md'),'# 更新日记')
+    await build()
+    scope='manuals';assert.equal((await build()).status,'unchanged')
+    assert.equal(readSnapshot({...x,scope:'manuals'}).root,manual.root)
+    assert.equal(readSnapshot({...x,scope:'videos'}).root,video.root)
+    assert.equal(imports,4)
+    fs.writeFileSync(path.join(x.docsDir,'manual.md'),'# 更新手册')
+    assert.notEqual((await build()).root,manual.root)
+  } finally {remove(x)}
+})
+
 test('ZIP contains valid compressed bytes and refuses unsafe names',()=>{
   const zip=makeResourceZip([{name:'diary/private.md',data:'你好'}])
   assert.equal(zip.readUInt32LE(0),0x04034b50)
@@ -197,11 +223,11 @@ test('resource CLI rebuilds and searches only the active snapshot',async()=>{
     fs.writeFileSync(path.join(home,'whale-diary.md'),'# 临时日记')
     const env={...process.env,DSH_HOME:home,WHALE_OPENVIKING_URL:`http://127.0.0.1:${server.address().port}`,WHALE_OPENVIKING_API_KEY:'key',WHALE_OPENVIKING_ACCOUNT:'',WHALE_OPENVIKING_USER:''}
     const script=fileURLToPath(new URL('../tools/commands/resource.mjs',import.meta.url)),diary=fileURLToPath(new URL('../tools/commands/diary.mjs',import.meta.url)),run=(...args)=>promisify(execFile)(process.execPath,[script,...args],{env}),runDiary=(...args)=>promisify(execFile)(process.execPath,[diary,...args],{env})
-    const first=JSON.parse((await run('rebuild')).stdout);assert.equal(first.status,'rebuilt')
+    const first=JSON.parse((await run('rebuild')).stdout).snapshots.diary;assert.equal(first.status,'rebuilt')
     assert.match((await runDiary('find','记录')).stdout,/diary\/public/)
     fs.unlinkSync(path.join(home,'whale-diary.md'))
     assert.doesNotMatch((await runDiary('find','记录')).stdout,/diary\/public/)
-    const second=JSON.parse((await run('rebuild')).stdout);assert.notEqual(first.root,second.root);assert.ok(deleted.includes(first.root))
+    const second=JSON.parse((await run('rebuild')).stdout).snapshots.diary;assert.notEqual(first.root,second.root);assert.ok(deleted.includes(first.root))
     assert.match((await run('find','直播')).stdout,new RegExp(second.root))
   } finally {await new Promise(r=>server.close(r));fs.rmSync(home,{recursive:true,force:true})}
 })

@@ -97,6 +97,42 @@ test('OpenViking settings reject untrusted or unauthenticated requests', async (
   assert.equal((await request(mount(undefined),'openviking',{host:'127.0.0.1',method:'POST',body})).status,503)
 })
 
+test('diary sync requires authorization and reports background reconciliation', async t => {
+  const route = 'openviking/diary-sync', host = '127.0.0.1'
+  assert.equal((await request(mount({requestRejection:()=>401}),route,{host,method:'POST'})).status,401)
+  const routes = mount({requestRejection:()=>undefined})
+  const file = path.join(dshHome,'whale-openviking.json')
+  fs.writeFileSync(file,JSON.stringify({url:'http://127.0.0.1:1933',account:'test',user:'whale',key:'test'}))
+  t.after(()=>fs.rmSync(file,{force:true}))
+  const {archiveDiary} = await import('../lib/diary-memory.js')
+  archiveDiary({book:'private',at:'2099-01-01T00:00:00+08:00',content:'fixture'},{home:dshHome})
+  let finish, reads=0, writes=0
+  const pending = new Promise(resolve=>{finish=resolve})
+  t.mock.method(globalThis,'fetch',async url=>{
+    if (url.endsWith('/context')) {reads++;await pending}
+    if (url.endsWith('/messages')) writes++
+    return {ok:true,json:async()=>({status:'ok',result:{messages:[]}})}
+  })
+  try {
+    const first = await request(routes,route,{host,method:'POST'})
+    assert.equal(first.status,202)
+    assert.equal(first.data.status.phase,'running')
+    const second = await request(routes,route,{host,method:'POST'})
+    assert.equal(second.data.status.phase,'running')
+  } finally { finish() }
+  for (let attempt=0;attempt<100;attempt++) {
+    const {data} = await request(routes,route,{host})
+    if (data.status.phase !== 'running') {
+      assert.equal(data.status.phase,'done')
+      assert.equal(data.status.uploaded,1)
+      assert.deepEqual([reads,writes],[1,1])
+      return
+    }
+    await new Promise(resolve=>setImmediate(resolve))
+  }
+  assert.fail('日记补传未完成')
+})
+
 test('QR routes enforce trust, host authentication and POST before running login', async () => {
   for (const name of ['start', 'poll', 'cancel']) {
     const route = 'auth/qr/' + name

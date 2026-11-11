@@ -30,7 +30,7 @@ const map = {
   likes: ['commands/likes.mjs', '谁赞了她（「收到的赞」通知流，含点赞者 mid/昵称）：--hours 24 [--owner] [--json]'],
   selftest: ['commands/selftest.mjs', '启动测试（装完先跑这个）：配置/凭据/登录态/目录/ffmpeg + 下一步两件事（未分组会话 · 完全权限）'],
   deps: ['commands/deps.mjs', '依赖体检（装完先跑它）：cookie / ffmpeg / Node / 数据目录；--json 给 agent 判断'],
-  diary: ['commands/diary.mjs', '日记：show / log / tail / sync / status / find / read'],
+  diary: ['commands/diary.mjs', '日记：show / log / tail / sync / status / find / read / archive'],
   memory: ['commands/memory.mjs', '记忆：recall <查询> [--mid MID] [--audience public] / read <URI> [--audience public] / experience <文件> / store <文件> / task <任务 ID>'],
   resource: ['commands/resource.mjs', '资源快照：rebuild / refresh / status / find <查询>'],
   'video-card': ['commands/video-card.mjs', '视频资料卡：save <JSON 文件> / sync [BV] / find <查询> / read <BV>'],

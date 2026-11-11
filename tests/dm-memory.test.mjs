@@ -10,6 +10,23 @@ import { recordDmMemory, flushDmMemory, extractDshMemory, queueDshMemoryExtracti
 import { recordInboxComment } from '../lib/comment-memory.js'
 
 const settings = { url:'http://localhost:1933', account:'aoe', user:'whale', key:'test' }
+test('uncertain messages prevent a completed extraction job',async t=>{
+  const b=setup(t),opts={home:b.home,settings,client:b.client}
+  b.add('user','first','one');await flushDmMemory(opts)
+  b.client.appendMessage=async()=>{throw Error('response lost')}
+  b.add('user','second','two');await flushDmMemory(opts)
+  const task=queueDshMemoryExtraction({...opts,dshSessionId:'bili-whale'})
+  await flushMemoryExtractions(opts)
+  const job=JSON.parse(fs.readFileSync(path.join(b.home,'whale-memory-extractions',task.id+'.json'),'utf8'))
+  assert.equal(job.status,'failed');assert.match(job.error,/1 条消息未确认/)
+})
+test('old session logs without a task receive asynchronous compensation once',async t=>{
+  const b=setup(t),opts={home:b.home,settings,client:b.client}
+  b.add('user','first','one');await flushDmMemory(opts)
+  fs.writeFileSync(path.join(b.home,'whale-session.json'),JSON.stringify({id:'new-session'}))
+  await flushMemoryExtractions(opts);await flushMemoryExtractions(opts)
+  assert.equal(b.calls.filter(c=>c.type==='extract').length,1)
+})
 function setup(t) {
   const home=fs.mkdtempSync(path.join(os.tmpdir(),'whale-dm-memory-'))
   t.after(()=>fs.rmSync(home,{recursive:true,force:true}))
