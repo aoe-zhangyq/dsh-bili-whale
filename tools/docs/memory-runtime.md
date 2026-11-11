@@ -56,7 +56,7 @@ node bili.mjs memory read <查询返回的 whale-public://URI> --audience public
 
 - 查视频：`video-card find "主题"`，全文 `video-card read <BV>`。深读后 `video-card save <JSON 文件>`，字段为 `bvid`、`title`、`creator`、`summary`、`observed_at`。
 - 私下查近期日记使用 `diary read public` 或 `diary read private`。需要查找较久的日记时可用 `diary find "关键词"`。公开会话不读私人日记。
-- 插件分别维护日记和视频资料快照。手册上传及归档日记补传由主人在设置页触发。快照和提取记忆可能滞后，冲突时核对本地原文。
+- 插件定期更新固定目录中的日记资源和变化的视频卡。手册上传及日记补传由主人在设置页触发。远端资料和提取记忆可能滞后，冲突时核对本地原文。
 
 ## 异常时
 

@@ -5,6 +5,20 @@ import os from 'node:os'
 import path from 'node:path'
 import {archiveDiary,syncDiaryMemory} from '../lib/diary-memory.js'
 
+test('resource diary without archives reports why no session was uploaded',async t=>{
+  const home=fs.mkdtempSync(path.join(os.tmpdir(),'whale-diary-empty-'))
+  t.after(()=>fs.rmSync(home,{recursive:true,force:true}))
+  fs.writeFileSync(path.join(home,'whale-diary.md'),'existing diary')
+  const settings={url:'http://localhost:1933',account:'test',user:'whale',key:'test'}
+  const client={sessionMessages:async()=>{throw Error('must not contact OV')}}
+  for(const createDir of [false,true]) {
+    if(createDir)fs.mkdirSync(path.join(home,'whale-diary-entries'),{recursive:true})
+    const result=await syncDiaryMemory({home,settings,client,manual:true})
+    assert.equal(result.reason,'no_archives');assert.equal(result.sessions,0)
+    assert.deepEqual(result.legacyDiaries,['whale-diary.md'])
+  }
+})
+
 test('failed midpoint extraction allows new uploads and next-month extraction',async t=>{
   const home=fs.mkdtempSync(path.join(os.tmpdir(),'whale-diary-failure-'))
   t.after(()=>fs.rmSync(home,{recursive:true,force:true}))

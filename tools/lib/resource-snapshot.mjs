@@ -20,7 +20,7 @@ const stagingPath=(home,settings,scope)=>path.join(home,`whale-resource-staging$
 export function readSnapshot({settings,home=DSH_HOME,scope='all'}) {
   let data
   try {data=JSON.parse(fs.readFileSync(pointerPath(home,scope),'utf8'))} catch(e) {if(e.code==='ENOENT')return null;throw Error('资源快照记录损坏，请先检查，未删除旧资源')}
-  if(!data||!ROOT_RE.test(data.root)||!Number.isFinite(data.createdAt)||(data.previous && !ROOT_RE.test(data.previous))||typeof data.identity!=='string') throw Error('资源快照记录无效，请先检查，未删除旧资源')
+  if(!data||!(ROOT_RE.test(data.root)||(data.root==='viking://resources/whale' && scope!=='all'))||!Number.isFinite(data.createdAt)||(data.previous && !ROOT_RE.test(data.previous))||typeof data.identity!=='string') throw Error('资源快照记录无效，请先检查，未删除旧资源')
   return data.identity===identity(settings)?data:null
 }
 
@@ -94,9 +94,10 @@ export async function withActiveSnapshot({settings,home=DSH_HOME,scope='all'}, f
   } finally {await release()}
 }
 
-export async function rebuildResourceSnapshot({client,settings,home=DSH_HOME,docsDir=defaultDocs,scope='all',onlyIfDue=false,intervalDays=7,now=Date.now}) {
+export async function rebuildResourceSnapshot({client,settings,home=DSH_HOME,docsDir=defaultDocs,scope='all',onlyIfDue=false,intervalDays=7,now=Date.now,bvid}) {
   if (!['all','manuals','diary','videos'].includes(scope)) throw Error('无效的资源范围')
   if(!Number.isInteger(intervalDays)||intervalDays<1||intervalDays>365)throw Error('资源重建间隔须为 1 至 365 天')
+  if(scope!=='all')return syncFixedResources({client,settings,home,docsDir,scope,onlyIfDue,intervalDays,now,bvid})
   let release
   try {release=await acquireProcessLock(pointerPath(home,scope)+'.build')} catch {throw Error('资源重建正在进行，请稍后重试')}
   try {
@@ -155,5 +156,57 @@ export async function rebuildResourceSnapshot({client,settings,home=DSH_HOME,doc
       catch {cleanupWarning=[cleanupWarning,'旧版资源检查未完成'].filter(Boolean).join('；')}
     }
     return {status:'rebuilt',root,files:source.entries.length,bytes:source.bytes,createdAt:next.createdAt,usage:next.usage,cleanupWarning}
+  } finally {await release()}
+}
+
+async function syncFixedResources({client,settings,home,docsDir,scope,onlyIfDue,intervalDays,now,bvid}) {
+  if(bvid!==undefined && (scope!=='videos'||!/^BV[0-9A-Za-z]{10}$/.test(bvid)))throw Error('无效的 BV 号')
+  const release=await acquireProcessLock(pointerPath(home,scope)+'.build')
+  try {
+    const old=readSnapshot({settings,home,scope}),root='viking://resources/whale'
+    const state=old?.root===root ? {...old,items:{...old.items}} : {identity:identity(settings),root,createdAt:now(),items:{}}
+    const age=now()-(state.checkedAt??0)
+    if(onlyIfDue && state.checkedAt && age>=0 && age<intervalDays*DAY)return {status:'not_due',root,createdAt:state.createdAt}
+    const source=collectResourceFiles({home,docsDir,scope})
+    const info=source.entries.find(entry=>entry.name==='snapshot-info.md')
+    const groups=scope==='videos'
+      ? source.entries.filter(entry=>entry.name.startsWith('videos/') && (!bvid||entry.name===`videos/${bvid}.md`)).map(entry=>({key:entry.name.slice(0,-3),entries:[{...entry,name:entry.name.slice(7)},info]}))
+      : [{key:scope,entries:source.entries.map(entry=>({...entry,name:entry.name.slice(entry.name.startsWith(scope+'/')?scope.length+1:0)}))}]
+    if(scope==='diary' && source.entries.length===1 && !state.items.diary)return {status:'empty'}
+    if(bvid && !groups.length)throw Error('本地视频卡不存在')
+    // Prepare and validate every upload before deleting any remote directory.
+    const plans=groups.map(group=>({...group,digest:hash(group.entries.map(entry=>entry.name+'\0'+hash(entry.data)).join('\n')),zip:makeResourceZip(group.entries)}))
+    let updated=0
+    const usage={durationMs:0,llmInputTokens:0,llmOutputTokens:0,embeddingTokens:0}
+    let hasUsage=false
+    const unlock=await acquireProcessLock(pointerPath(home,scope)+'.switch')
+    try {
+      for(const plan of plans) {
+        if((onlyIfDue || (scope==='videos' && !bvid)) && state.items[plan.key]?.digest===plan.digest && state.items[plan.key]?.status==='done')continue
+        state.items[plan.key]={status:'running',digest:plan.digest,at:now()}
+        delete state.checkedAt
+        savePointer(home,scope,state)
+        const target=root+'/'+plan.key
+        try {
+          await client.removeSnapshot(target)
+          const imported=await client.importSnapshot(target,plan.zip)
+          verifyTree(target,plan.entries,await client.snapshotTree(target))
+          state.items[plan.key]={status:'done',digest:plan.digest,at:now()}
+          state.createdAt=now();updated++
+          if(imported?.usage){hasUsage=true;for(const key of Object.keys(usage))usage[key]=usage[key]===null||imported.usage[key]==null?null:usage[key]+imported.usage[key]}
+          savePointer(home,scope,state)
+        } catch(error) {
+          state.items[plan.key]={...state.items[plan.key],status:'failed',error:error.message}
+          savePointer(home,scope,state)
+          throw Error(`固定目录 ${target} 更新未完成，可能暂不可查询；本地原件保留，请重新同步：${error.message}`)
+        }
+      }
+      // A targeted BV sync must not defer the periodic check of other cards.
+      if(!bvid)state.checkedAt=now()
+      state.files=source.entries.length;state.bytes=source.bytes
+      if(updated)state.usage=hasUsage?usage:null
+      savePointer(home,scope,state)
+    } finally {await unlock()}
+    return {status:updated?'rebuilt':plans.length?'unchanged':'empty',root,createdAt:state.createdAt,files:source.entries.length,bytes:source.bytes,updated,usage:hasUsage?usage:null}
   } finally {await release()}
 }

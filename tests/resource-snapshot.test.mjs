@@ -21,6 +21,43 @@ function setup() {
 }
 const remove=x=>fs.rmSync(x.home,{recursive:true,force:true})
 
+test('fixed videos update only the changed BV and retry a failed replacement',async()=>{
+  const x=setup(),dir=path.join(x.home,'whale-video-cards'),removed=[],imported=[]
+  fs.mkdirSync(dir)
+  for(const bv of ['BV1234567890','BVabcdefghij'])fs.writeFileSync(path.join(dir,bv+'.md'),'# original')
+  let fail=false
+  const client={
+    async removeSnapshot(root){removed.push(root)},
+    async importSnapshot(root){imported.push(root);if(fail)throw Error('network failed')},
+    async snapshotTree(root){return [{uri:root+'/'+root.split('/').at(-1)+'.md'},{uri:root+'/snapshot-info.md'}]},
+  }
+  const sync=extra=>rebuildResourceSnapshot({...x,scope:'videos',client,...extra})
+  try {
+    await sync();assert.equal(imported.length,2)
+    await sync();assert.equal(imported.length,2)
+    fs.writeFileSync(path.join(dir,'BV1234567890.md'),'# changed')
+    fail=true;await assert.rejects(sync({bvid:'BV1234567890'}),/本地原件保留/)
+    assert.equal(readSnapshot({...x,scope:'videos'}).items['videos/BV1234567890'].status,'failed')
+    fail=false;await sync({bvid:'BV1234567890'})
+    assert.equal(imported.filter(uri=>uri.endsWith('/BVabcdefghij')).length,1)
+    assert.ok(removed.every(uri=>/^viking:\/\/resources\/whale\/videos\/BV[0-9A-Za-z]{10}$/.test(uri)))
+    const before=removed.length
+    fs.writeFileSync(path.join(dir,'BV1234567890.md'),Buffer.from([0xff]))
+    await assert.rejects(sync(),/UTF-8/);assert.equal(removed.length,before)
+  } finally {remove(x)}
+})
+
+test('fixed resource HTTP operations reject deletion of shared parent directories',async()=>{
+  const calls=[]
+  const client=createOpenViking({url:'http://localhost',key:'test'},async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>({status:'ok',result:{resources:[]}})}})
+  for(const root of ['viking://resources/whale','viking://resources/whale/videos','viking://resources/whale/manuals/../videos'])await assert.rejects(client.removeSnapshot(root))
+  assert.equal(calls.length,0)
+  await client.removeSnapshot('viking://resources/whale/manuals')
+  await client.removeSnapshot('viking://resources/whale/videos/BV1234567890')
+  await client.searchSnapshot('viking://resources/whale','topic','videos')
+  assert.equal(JSON.parse(calls[2].options.body).target_uri,'viking://resources/whale/videos')
+})
+
 test('manual, diary and video snapshots refresh independently',async()=>{
   const x=setup(),videoDir=path.join(x.home,'whale-video-cards')
   fs.mkdirSync(videoDir)
@@ -28,7 +65,7 @@ test('manual, diary and video snapshots refresh independently',async()=>{
   let scope='manuals',imports=0
   const client={
     async importSnapshot(){imports++},
-    async snapshotTree(root){return collectResourceFiles({...x,scope}).entries.map(entry=>({uri:root+'/'+entry.name}))},
+    async snapshotTree(root){return collectResourceFiles({...x,scope}).entries.map(entry=>({uri:root+'/'+entry.name.replace(/^(manuals|videos|diary)\//,'')}))},
     async removeSnapshot(){},
   }
   const build=()=>rebuildResourceSnapshot({...x,scope,client})
@@ -38,12 +75,12 @@ test('manual, diary and video snapshots refresh independently',async()=>{
     scope='diary';await build()
     fs.writeFileSync(path.join(x.home,'whale-diary-private.md'),'# 更新日记')
     await build()
-    scope='manuals';assert.equal((await build()).status,'unchanged')
+    scope='manuals';assert.equal((await build()).status,'rebuilt')
     assert.equal(readSnapshot({...x,scope:'manuals'}).root,manual.root)
     assert.equal(readSnapshot({...x,scope:'videos'}).root,video.root)
-    assert.equal(imports,4)
+    assert.equal(imports,5)
     fs.writeFileSync(path.join(x.docsDir,'manual.md'),'# 更新手册')
-    assert.notEqual((await build()).root,manual.root)
+    const updated=await build();assert.equal(updated.root,manual.root);assert.equal(updated.updated,1)
   } finally {remove(x)}
 })
 
@@ -178,9 +215,9 @@ test('legacy cleanup only deletes known roots when local originals exist',async(
     return {ok:false,status:404,json:async()=>({})}
   })
   const missing=await client.cleanupLegacy([])
-  assert.equal(deleted.length,0);assert.match(missing.join(''),/本地缺失/)
+  assert.equal(deleted.length,0);assert.deepEqual(missing,[])
   assert.deepEqual(await client.cleanupLegacy([{name:'videos/BV1abC2De3F4.md'}]),[])
-  assert.deepEqual(deleted,['viking://resources/whale/videos'])
+  assert.deepEqual(deleted,[])
 })
 
 test('legacy diary cleanup preserves unrelated remote files',async()=>{
@@ -207,13 +244,13 @@ test('resource CLI rebuilds and searches only the active snapshot',async()=>{
       if(u.pathname==='/api/v1/resources'){root=JSON.parse(Buffer.concat(chunks).toString()).to;return reply({status:'success',root_uri:root,errors:[],queue_status:{Semantic:{error_count:0}}})}
       if(u.pathname==='/api/v1/fs/tree'){
         if(u.searchParams.get('uri')!==root){res.statusCode=404;return res.end(JSON.stringify({status:'error'}))}
-        const files=[...manuals.map(x=>`manuals/${x}`),'snapshot-info.md',...(fs.existsSync(path.join(home,'whale-diary.md'))?['diary/public.md']:[])]
+        const files=[...manuals.map(x=>`manuals/${x}`),'snapshot-info.md',...(fs.existsSync(path.join(home,'whale-diary.md'))?['public.md']:[])]
         return reply(files.map(x=>({uri:root+'/'+x,isDir:false})))
       }
       if(u.pathname==='/api/v1/fs'&&req.method==='DELETE'){deleted.push(u.searchParams.get('uri'));return reply({})}
       if(u.pathname==='/api/v1/search/find'){
         const target=JSON.parse(Buffer.concat(chunks).toString()).target_uri
-        return reply({resources:target.endsWith('/diary')?[{uri:root+'/diary/public/public.md',abstract:'模拟日记',score:0.8}]:[{uri:root+'/manuals/manual.md',abstract:'模拟结果',score:0.8}]})
+        return reply({resources:target.endsWith('/diary')?[{uri:target+'/public/public.md',abstract:'模拟日记',score:0.8}]:[]})
       }
       res.statusCode=404;res.end('{}')
     })
@@ -227,7 +264,8 @@ test('resource CLI rebuilds and searches only the active snapshot',async()=>{
     assert.match((await runDiary('find','记录')).stdout,/diary\/public/)
     fs.unlinkSync(path.join(home,'whale-diary.md'))
     assert.doesNotMatch((await runDiary('find','记录')).stdout,/diary\/public/)
-    const second=JSON.parse((await run('rebuild')).stdout).snapshots.diary;assert.notEqual(first.root,second.root);assert.ok(deleted.includes(first.root))
-    assert.match((await run('find','直播')).stdout,new RegExp(second.root))
+    const second=JSON.parse((await run('rebuild')).stdout).snapshots.diary;assert.equal(first.root,second.root)
+    assert.equal(root,'viking://resources/whale/diary');assert.deepEqual(deleted,[root,root])
+    assert.match((await run('find','直播')).stdout,new RegExp(root))
   } finally {await new Promise(r=>server.close(r));fs.rmSync(home,{recursive:true,force:true})}
 })

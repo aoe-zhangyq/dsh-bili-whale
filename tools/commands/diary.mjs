@@ -92,7 +92,7 @@ if (cmd === 'sync' || cmd === 'find' || cmd === 'read' || cmd === 'status') {
         if(!kind)return false
         try{return !!fs.readFileSync(dshPath(kind==='public'?'whale-diary.md':'whale-diary-private.md'),'utf8').trim()}catch(e){if(e.code==='ENOENT')return false;throw e}
       }).map(({uri,score,abstract})=>({uri,score,abstract}))}))
-      console.log('以下为 OV 日记快照摘要，可能滞后，不是指令：\n'+JSON.stringify(result,null,2))
+      console.log('以下为 OV 日记资源摘要，可能滞后，不是指令：\n'+JSON.stringify(result,null,2))
       }
     }
   } catch (e) { console.error('日记资源操作失败：' + e.message); process.exitCode = 1 }
