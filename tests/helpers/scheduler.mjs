@@ -15,13 +15,16 @@ fs.writeFileSync(process.env.BILI_WHALE_CONFIG,JSON.stringify(cfg))
 const persona=path.join(process.env.USERPROFILE,'.bili-ai/persona.md')
 fs.writeFileSync(persona,'测试专属人设')
 const messages=[]
-let fail=true,attempts=0
-const sched=startScheduler({sessionController:{create:async()=>{},prompt:async p=>{attempts++;if(fail)throw Error('delivery failure');messages.push(p.content[0].text)}}},
+let fail=true,attempts=0,running=false
+const hostState=async()=>({running,queue:[],pendingInput:[]})
+const sched=startScheduler({sessionController:{state:hostState,create:async()=>{},prompt:async p=>{attempts++;if(fail)throw Error('delivery failure');messages.push(p.content[0].text)}}},
   {dshHome:dsh,biliMjs:'unused',cwd:process.env.USERPROFILE})
 const samples=[.75,.9];const p=makePlan(cfg.night,{},now,()=>samples.shift())
 fs.writeFileSync(state,JSON.stringify(p))
 await sched.tick();assert.equal(attempts,0)
 now=new RealDate('2026-10-22T00:30:00').getTime()
+running=true;await sched.tick();assert.equal(attempts,0)
+running=false
 await sched.tick();assert.equal(attempts,1)
 assert.equal(JSON.parse(fs.readFileSync(state)).fired,false)
 fail=false;await sched.tick();assert.equal(attempts,2)
@@ -41,7 +44,7 @@ now=new RealDate('2026-10-23T23:00:00').getTime()
 cfg.night.skipChance=1;fs.writeFileSync(process.env.BILI_WHALE_CONFIG,JSON.stringify(cfg))
 const skip=makePlan(cfg.night,historyOf(before,now),now,()=>0)
 fs.writeFileSync(state,JSON.stringify(skip))
-const s2=startScheduler({sessionController:{create:async()=>{},prompt:async p=>messages.push(p.content[0].text)}},{dshHome:dsh,biliMjs:'unused',cwd:process.env.USERPROFILE})
+const s2=startScheduler({sessionController:{state:hostState,create:async()=>{},prompt:async p=>messages.push(p.content[0].text)}},{dshHome:dsh,biliMjs:'unused',cwd:process.env.USERPROFILE})
 await s2.tick();s2.stop()
 assert.match(messages.at(-1),/今晚不看/);assert.ok(messages.at(-1).includes('关掉了推送'))
 assert.ok(messages.at(-1).includes('测试专属人设'))

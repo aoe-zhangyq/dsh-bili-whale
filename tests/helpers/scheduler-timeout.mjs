@@ -19,7 +19,7 @@ for (const channel of ['tick', 'listenTick', 'dmTick']) {
   process.env.TEST_DM_FILE = path.join(home,'timeout-dm.json')
   fs.writeFileSync(process.env.TEST_DM_FILE, JSON.stringify({timestamp:Math.floor(now/1000),msg_key:'timeout-msg',sender_uid:222,content:JSON.stringify({content:'hello'})}))
   let calls = 0, release
-  const sched = startScheduler({sessionController:{create:async()=>{},prompt:()=>{calls++;return new Promise(r=>{release=r})}}}, {dshHome:dsh,cwd:home,biliMjs:fileURLToPath(new URL('../../tools/bili.mjs',import.meta.url))})
+  const sched = startScheduler({sessionController:{state:async()=>({running:false,queue:[],pendingInput:[]}),create:async()=>{},prompt:()=>{calls++;return new Promise(r=>{release=r})}}}, {dshHome:dsh,cwd:home,biliMjs:fileURLToPath(new URL('../../tools/bili.mjs',import.meta.url))})
   let pending
   try {
     if(channel==='listenTick') {

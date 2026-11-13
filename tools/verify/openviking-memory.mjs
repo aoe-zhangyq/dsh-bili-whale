@@ -61,27 +61,24 @@ try {
   const [dm]=sessions('dm')
   const metadata=await request(`/api/v1/sessions/${dm}`,{key:user.user_key})
   assert.equal(metadata.message_count,2)
-  assert.match(dm,/mid-900000001/)
+  assert.match(dm,/^whale-dsh-/)
   report.checks.readableIdAndIncrementalAppend=true
-  const extract=async(id,label,channel)=>{
+  const extract=async(id,label)=>{
     progress(`extract ${label}`)
     const started=Date.now()
-    let result,called=0
-    clock+=300000
-    await flushDmMemory({...options,channel,client:{appendMessage:client.appendMessage,extractSession:async current=>{
-      assert.equal(current,id);called++;result=await client.extractSession(current)
-    }}})
-    assert.equal(called,1)
+    const result=await client.extractSession(id)
+    assert.equal(result.status,'completed')
     report.extractions.push({label,durationMs:Date.now()-started,result})
     progress(`extracted ${label}`)
   }
-  await extract(dm,'dm','dm')
+  await extract(dm,'dm')
   recordDmMemory({owner:'900000001',role:'assistant',content:'这是新分段的虚构回复。',key:'dm-3',createdAt:clock},options)
   await flushDmMemory(options)
-  const [nextDm]=sessions('dm')
-  assert.notEqual(nextDm,dm)
-  assert.equal((await request(`/api/v1/sessions/${dm}`,{key:user.user_key})).message_count,2)
-  assert.equal((await request(`/api/v1/sessions/${nextDm}`,{key:user.user_key})).message_count,1)
+  assert.deepEqual(sessions('dm'),[dm])
+  const dmMetadata=await request(`/api/v1/sessions/${dm}`,{key:user.user_key})
+  assert.equal(dmMetadata.message_count,1)
+  const firstArchive=await request(`/api/v1/sessions/${dm}/archives/archive_001`,{key:user.user_key})
+  assert.equal(firstArchive.messages.length,2)
   report.checks.sealedBatchNotReplayed=true
   const comment={type:1,oid:'990000001',root:'990000011',createdAt:clock}
   recordCommentMessage({...comment,mid:'900000001',name:'星舟的新昵称',isOwner:true,id:'990000021',content:'虚构测试人物星舟：我喜欢蓝色，也喜欢这个鲸鱼科普视频。'},options)
@@ -90,13 +87,12 @@ try {
   const [thread]=sessions('comment')
   assert.equal((await request(`/api/v1/sessions/${thread}`,{key:user.user_key})).message_count,2)
   report.checks.multiplePeopleInOneThread=true
-  await extract(thread,'comment','comment')
+  await extract(thread,'comment')
   recordCommentMessage({...comment,oid:'990000002',root:'990000012',mid:'900000001',name:'又换昵称的星舟',isOwner:true,id:'990000023',content:'这是另一个视频。虚构人物星舟确认：我仍喜欢蓝色，补充喜欢深海纪录片。'},options)
   await flushDmMemory({...options,channel:'comment'})
-  const second=sessions('comment').find(id=>id!==thread)
-  assert.ok(second)
-  report.checks.separateVideoSessions=true
-  await extract(second,'second_video','comment')
+  assert.deepEqual(sessions('comment'),[thread])
+  report.checks.sharedPublicSessionAcrossVideos=true
+  await extract(thread,'second_video')
   const publicEvidence=recallPublicMemory('鲸鱼',{...options,mid:'900000001'})
   assert.ok(publicEvidence.length)
   assert.ok(publicEvidence.every(item=>item.source.person.mid==='900000001' && item.source.visibility==='public'))
@@ -108,7 +104,8 @@ try {
     const content=await request('/api/v1/content/read?uri='+encodeURIComponent(item.uri),{key:user.user_key})
     report.memories.push({uri:item.uri,content})
   }
-  report.checks.hasExtractedMemory=report.memories.length>0
+  // New users already have identity.md and soul.md before any extraction.
+  report.checks.hasExtractedMemory=report.memories.some(x=>/\/memories\/(?:entities|preferences|events)\//.test(x.uri))
   const entityFiles=report.memories.filter(x=>x.uri.includes('/entities/') && /\/bilibili_\d+\.md$/.test(x.uri))
   const groups=Map.groupBy(entityFiles,x=>x.uri.split('/').at(-1))
   report.analysis={

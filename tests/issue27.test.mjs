@@ -24,6 +24,22 @@ test('defaults repeat persona and persist the DSH session for memory attribution
   assert.equal(f.sent.length,2);assert.ok(f.sent.every(r=>r.content[0].text.includes('PERSONA-A')))
   assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir,'whale-session.json'),'utf8')).id,'bili-whale')
 })
+
+test('DSH-assigned session identity survives a failed prompt and restart',async t=>{
+  const f=fixture(t)
+  let creates=0
+  f.args.controller.create=async()=>{creates++;return {sessionId:'host-assigned'}}
+  f.args.controller.prompt=async(request,signal)=>{
+    assert.equal(request.sessionId,'host-assigned')
+    assert.ok(request.requestId)
+    assert.equal(request.mode,'queue')
+    signal.throwIfAborted()
+    throw Error('admission failed')
+  }
+  await assert.rejects(f.make().send(f.request),/admission failed/)
+  await assert.rejects(f.make().send(f.request),/admission failed/)
+  assert.equal(creates,1)
+})
 test('failed delivery retries persona; concurrent channels inject only once; edits reinject',async t=>{
   const f=fixture(t,{personaOncePerSession:true}),d=f.make();f.fail(true)
   await assert.rejects(d.send(f.request),/send failed/);f.fail(false)
@@ -68,11 +84,14 @@ test('rotation persists the old OV extraction task before creating the new DSH a
   let failExtract=true
   t.mock.method(globalThis,'fetch',async (url,options)=>{
     if(url.endsWith('/messages'))operations.push('append')
-    if(url.endsWith('/extract')) {
+    if(url.endsWith('/commit')) {
       operations.push('extract')
       if(failExtract)throw Error('OV offline')
     }
-    return {ok:true,json:async()=>({status:'ok',result:url.includes('/search/find')?{memories:[]}:[]})}
+    const result = url.includes('/search/find') ? {memories:[]}
+      : url.endsWith('/commit') ? {status:'accepted',task_id:'extraction'}
+      : url.endsWith('/tasks/extraction') ? {status:'completed'} : {commit_count:0}
+    return {ok:true,json:async()=>({status:'ok',result})}
   })
   const delivery=f.make();await delivery.send(f.request)
   operations.length=0

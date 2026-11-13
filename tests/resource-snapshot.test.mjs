@@ -202,7 +202,7 @@ test('HTTP snapshot operations scope searches and prohibit unsafe deletion',asyn
   const root='viking://resources/whale-snapshot-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   const imported=await client.importSnapshot(root,Buffer.from('zip'))
   assert.deepEqual(imported.usage,{durationMs:1200,llmInputTokens:100,llmOutputTokens:20,embeddingTokens:50})
-  assert.equal(JSON.parse(calls[1].opts.body).reason,'')
+  assert.equal(JSON.parse(calls[1].opts.body).create_parent,true)
   await assert.rejects(client.removeSnapshot('viking://resources'),/无效/)
 })
 

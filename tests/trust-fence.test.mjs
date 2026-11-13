@@ -109,9 +109,9 @@ test('diary sync requires authorization and reports background reconciliation', 
   let finish, reads=0, writes=0
   const pending = new Promise(resolve=>{finish=resolve})
   t.mock.method(globalThis,'fetch',async url=>{
-    if (url.endsWith('/context')) {reads++;await pending}
+    if (url.includes('/context?')) {reads++;await pending}
     if (url.endsWith('/messages')) writes++
-    return {ok:true,json:async()=>({status:'ok',result:{messages:[]}})}
+    return {ok:true,json:async()=>({status:'ok',result:{messages:[],commit_count:0}})}
   })
   try {
     const first = await request(routes,route,{host,method:'POST'})

@@ -160,7 +160,7 @@ OpenViking 人工配置与排障见 [OPENVIKING.md](OPENVIKING.md)；大肥鱼�
 
 ## 装
 
-**前提**：建议新安装使用 [Node.js v26.12.1](https://nodejs.org/dist/v26.12.1/) 或更新的 26.x 维护版本。工具链最低要求 Node.js 18。看画面还需要 **ffmpeg**（见下）。
+**前提**：DSH 需为 **0.2.2-rc.1 或更新版本**。该宿主版本要求 Node.js 24.9.0 或更新版本。启用记忆时使用 OpenViking **v0.5.4.1**。建议新安装使用 [Node.js v26.12.1](https://nodejs.org/dist/v26.12.1/) 或更新的 26.x 维护版本。工具链最低要求 Node.js 18。看画面还需要 **ffmpeg**（见下）。
 
 DSH 可能优先使用宿主提供的 Node。升级后可在「设置 → 养鱼 → 依赖体检」确认插件实际使用的版本。如需指定安装的 Node，可在启动 DSH 前将 `DSH_NODE` 设为该可执行文件的绝对路径，再重启 DSH。
 
@@ -172,6 +172,8 @@ dsh plugin --profile desktop add "link:C:\path\to\dsh-bili-whale"
 
 # 3) 打开「设置 → 养鱼」（不是 /dsh-bili/ 那个页面 —— 那个被 DSH 的信任栅栏挡着 ✗）
 ```
+
+使用 npm 安装的 DSH CLI 时，把命令中的 `--profile desktop` 换成 `--profile web`，然后运行 `dsh --profile web`。Desktop 配置由桌面版自带的命令管理。
 
 **设置页里三件事**：
 

@@ -40,23 +40,51 @@ test('store preserves original roles and timestamps, and validates before writin
   assert.equal(calls.length,count)
 })
 
-test('private chat appends and extracts without committing the session', async () => {
+test('private chat commits with the official API and waits for extraction', async () => {
   const calls=[]
   const client=createOpenViking({url:'http://localhost',key:'test'},async (url,options)=>{
-    calls.push({url,options}); return {ok:true,json:async()=>({status:'ok',result:[]})}
+    calls.push({url,options})
+    const result = url.endsWith('/commit') ? {status:'accepted',task_id:'task-1'}
+      : url.endsWith('/tasks/task-1') ? {status:'completed'} : {commit_count:0}
+    return {ok:true,json:async()=>({status:'ok',result})}
   })
   const id='whale-dm-12345678-abcd'
   await client.appendMessage(id,{role:'user',content:'hello',created_at:'2026-10-29T10:00:00Z'})
   await client.extractSession(id)
-  assert.match(calls[0].url,/\/messages$/); assert.match(calls[1].url,/\/extract$/)
+  assert.match(calls[0].url,/\/messages$/); assert.match(calls[2].url,/\/commit$/)
+  assert.deepEqual(JSON.parse(calls[2].options.body),{keep_recent_count:0})
+  assert.match(calls[3].url,/\/tasks\/task-1$/)
   assert.equal(JSON.parse(calls[0].options.body).role,'user')
-  assert.equal(calls.some(x=>x.url.endsWith('/commit')),false)
+})
+
+test('diary reconciliation reads archived messages and extraction retries a failed archive first', async () => {
+  const calls=[]
+  const sha='a'.repeat(64)
+  const client=createOpenViking({url:'http://localhost',key:'test'},async (url,options)=>{
+    calls.push({url,options})
+    const result = url.includes('/context?') ? {messages:[{content:'live'}]}
+      : url.endsWith('/archive_001') ? {status:'failed',messages_sha256:sha,messages:[{parts:[{type:'text',text:'archived'}]}]}
+      : url.endsWith('/retry') ? {status:'accepted',task_id:'recovery'}
+      : url.endsWith('/tasks/recovery') ? {status:'completed'}
+      : url.endsWith('/commit') ? {status:'accepted',task_id:'next'}
+      : url.endsWith('/tasks/next') ? {status:'failed'}
+      : {commit_count:1}
+    return {ok:true,json:async()=>({status:'ok',result})}
+  })
+  assert.deepEqual(await client.sessionMessages('diary'),['archived','live'])
+  await assert.rejects(client.extractSession('diary'),/next.*failed/)
+  assert.deepEqual(JSON.parse(calls.find(c=>c.url.endsWith('/retry')).options.body),{
+    expected_messages_sha256:sha,allow_ownerless_ready:true,
+  })
+  assert.ok(calls.findIndex(c=>c.url.endsWith('/tasks/recovery')) < calls.findIndex(c=>c.url.endsWith('/commit')))
 })
 
 test('explicit readable session IDs are accepted and unsafe path strings are rejected before requests',async()=>{
   const urls=[]
   const client=createOpenViking({url:'http://localhost',key:'test'},async url=>{
-    urls.push(url);return {ok:true,json:async()=>({status:'ok',result:[]})}
+    urls.push(url)
+    const result = url.endsWith('/commit') ? {status:'skipped',archived:false} : {commit_count:0}
+    return {ok:true,json:async()=>({status:'ok',result})}
   })
   await client.appendMessage('bili_dm_123456',{role:'user',content:'hello'})
   await client.extractSession('bili_dm_123456')
@@ -65,7 +93,7 @@ test('explicit readable session IDs are accepted and unsafe path strings are rej
     await assert.rejects(client.appendMessage(id,{role:'user',content:'hello'}),/会话 ID/)
     await assert.rejects(client.extractSession(id),/会话 ID/)
   }
-  assert.equal(urls.length,2)
+  assert.equal(urls.length,3)
 })
 
 test('missing credentials disable integration and errors are visible', async () => {
