@@ -60,7 +60,9 @@ node tools/bili.mjs memory task "返回的任务 ID"
 
 两本日记发布到固定目录 `viking://resources/whale/diary`。手册发布到固定目录 `viking://resources/whale/manuals`，视频卡发布到 `viking://resources/whale/videos/<BV>`。插件启动时及每小时检查日记和视频卡，按设置间隔同步，默认每 7 天一次，可调整为 1–365 天。视频卡只更新新增或变化的 BV，手册由设置页按钮主动替换，即使内容相同也重新发布，可用于恢复远端缺失或重新生成概要。固定目录属于当前服务租户；同租户多安装会共享这些路径，应使用同一份原件。升级后各分类首次同步改用固定路径，旧快照保留但不再作为该分类的检索入口。
 
-日记、手册和视频卡先完整读取、校验并准备上传包，再删除对应固定目录并上传，最后检查导入文件。更新期间可能不可查询；失败记录保存在本地，重新同步可恢复。不会删除整个视频父目录，不会因一张卡更新而重传其他卡。本地同步记录沿用 `whale-resource-snapshot-manuals.json` / `-videos.json` 文件名兼容旧版，但仅记录固定目录各项摘要和完成状态，不维护多版本。日记同步记录使用 `whale-resource-snapshot-diary.json`。插件不主动删除会话或用户记忆。
+日记和手册的 ZIP 根目录直接放源文档，日记文件名为 `public.md` 和 `private.md`。视频卡逐张上传 Markdown，直接以 `videos/<BV>` 作为文档根目录，短卡通常落在 `videos/<BV>/<BV>.md`。OpenViking 按自己的 Markdown 解析规则命名并拆分章节，固定目录上传不含 `snapshot-info.md`。已有的日记和视频目录在下次同步时替换，手册通过设置页重新发布后替换。
+
+日记、手册和视频卡先完整读取、校验并准备上传数据，再删除对应固定目录并上传，最后检查导入文件。更新期间可能不可查询；失败记录保存在本地，重新同步可恢复。不会删除整个视频父目录，不会因一张卡更新而重传其他卡。本地同步记录沿用 `whale-resource-snapshot-manuals.json` / `-videos.json` 文件名兼容旧版，但仅记录固定目录各项摘要和完成状态，不维护多版本。日记同步记录使用 `whale-resource-snapshot-diary.json`。插件不主动删除会话或用户记忆。
 
 ```powershell
 node tools/bili.mjs resource rebuild

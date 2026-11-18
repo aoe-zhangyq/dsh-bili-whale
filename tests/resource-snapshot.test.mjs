@@ -28,8 +28,13 @@ test('fixed videos update only the changed BV and retry a failed replacement',as
   let fail=false
   const client={
     async removeSnapshot(root){removed.push(root)},
-    async importSnapshot(root){imported.push(root);if(fail)throw Error('network failed')},
-    async snapshotTree(root){return [{uri:root+'/'+root.split('/').at(-1)+'.md'},{uri:root+'/snapshot-info.md'}]},
+    async importSnapshot(root,data){
+      const name=root.split('/').at(-1)+'.md'
+      assert.deepEqual(data,fs.readFileSync(path.join(dir,name)))
+      imported.push(root)
+      if(fail)throw Error('network failed')
+    },
+    async snapshotTree(root){return [{uri:root+'/内容摘要/内容摘要_1.md'}]},
   }
   const sync=extra=>rebuildResourceSnapshot({...x,scope:'videos',client,...extra})
   try {
@@ -64,7 +69,14 @@ test('manual, diary and video snapshots refresh independently',async()=>{
   fs.writeFileSync(path.join(videoDir,'BV1234567890.md'),'# 视频卡')
   let scope='manuals',imports=0
   const client={
-    async importSnapshot(){imports++},
+    async importSnapshot(root,upload){
+      if(scope!=='videos') {
+        const nameLength=upload.readUInt16LE(26)
+        assert.equal(upload.subarray(30,30+nameLength).toString(),scope==='manuals'?'manual.md':'private.md')
+        assert.equal(upload.readUInt32LE(30+nameLength+upload.readUInt32LE(18)),0x02014b50)
+      }
+      imports++
+    },
     async snapshotTree(root){return collectResourceFiles({...x,scope}).entries.map(entry=>({uri:root+'/'+entry.name.replace(/^(manuals|videos|diary)\//,'')}))},
     async removeSnapshot(){},
   }
@@ -196,13 +208,21 @@ test('HTTP snapshot operations scope searches and prohibit unsafe deletion',asyn
   const client=createOpenViking({url:'http://localhost',key:'key'},async(url,opts)=>{
     calls.push({url,opts})
     if(url.endsWith('temp_upload'))return {ok:true,json:async()=>({status:'ok',result:{temp_file_id:'x.zip'}})}
-    if(url.endsWith('/resources'))return {ok:true,json:async()=>({status:'ok',result:{status:'success',root_uri:'viking://resources/whale-snapshot-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',errors:[],queue_status:{Semantic:{error_count:0,requeue_count:0}}},telemetry:{summary:{duration_ms:1200,tokens:{llm:{input:100,output:20},embedding:{total:50}}}}})}
+    if(url.endsWith('/resources'))return {ok:true,json:async()=>({status:'ok',result:{status:'success',root_uri:JSON.parse(opts.body).to,errors:[],queue_status:{Semantic:{error_count:0,requeue_count:0}}},telemetry:{summary:{duration_ms:1200,tokens:{llm:{input:100,output:20},embedding:{total:50}}}}})}
     return {ok:true,json:async()=>({status:'ok',result:{resources:[]}})}
   })
   const root='viking://resources/whale-snapshot-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
   const imported=await client.importSnapshot(root,Buffer.from('zip'))
   assert.deepEqual(imported.usage,{durationMs:1200,llmInputTokens:100,llmOutputTokens:20,embeddingTokens:50})
+  assert.equal(calls[0].opts.body.get('file').name,'whale-snapshot.zip')
   assert.equal(JSON.parse(calls[1].opts.body).create_parent,true)
+  const videoRoot='viking://resources/whale/videos/BV1234567890'
+  await client.importSnapshot(videoRoot,Buffer.from('# 视频卡'))
+  const videoFile=calls[2].opts.body.get('file')
+  assert.equal(videoFile.name,'BV1234567890.md')
+  assert.equal(videoFile.type,'text/markdown')
+  assert.equal(await videoFile.text(),'# 视频卡')
+  assert.equal(JSON.parse(calls[3].opts.body).to,videoRoot)
   await assert.rejects(client.removeSnapshot('viking://resources'),/无效/)
 })
 
@@ -234,23 +254,21 @@ test('legacy diary cleanup preserves unrelated remote files',async()=>{
 
 test('resource CLI rebuilds and searches only the active snapshot',async()=>{
   const home=fs.mkdtempSync(path.join(os.tmpdir(),'whale-snapshot-cli-'))
-  const serverRoot=fileURLToPath(new URL('../tools/docs/',import.meta.url)),manuals=fs.readdirSync(serverRoot).filter(x=>/^[A-Za-z0-9_-]+\.md$/.test(x))
-  let root='',deleted=[]
+  let root='',deleted=[],uploads=0
   const server=http.createServer((req,res)=>{
     const chunks=[];req.on('data',x=>chunks.push(x));req.on('end',()=>{
       const u=new URL(req.url,'http://localhost');res.setHeader('content-type','application/json')
       const reply=result=>res.end(JSON.stringify({status:'ok',result}))
-      if(u.pathname==='/api/v1/resources/temp_upload')return reply({temp_file_id:'upload.zip'})
+      if(u.pathname==='/api/v1/resources/temp_upload'){uploads++;return reply({temp_file_id:'upload.zip'})}
       if(u.pathname==='/api/v1/resources'){root=JSON.parse(Buffer.concat(chunks).toString()).to;return reply({status:'success',root_uri:root,errors:[],queue_status:{Semantic:{error_count:0}}})}
       if(u.pathname==='/api/v1/fs/tree'){
         if(u.searchParams.get('uri')!==root){res.statusCode=404;return res.end(JSON.stringify({status:'error'}))}
-        const files=[...manuals.map(x=>`manuals/${x}`),'snapshot-info.md',...(fs.existsSync(path.join(home,'whale-diary.md'))?['public.md']:[])]
-        return reply(files.map(x=>({uri:root+'/'+x,isDir:false})))
+        return reply([{uri:root+'/public/日记标题/日期章节/日期章节_1.md',isDir:false}])
       }
       if(u.pathname==='/api/v1/fs'&&req.method==='DELETE'){deleted.push(u.searchParams.get('uri'));return reply({})}
       if(u.pathname==='/api/v1/search/find'){
         const target=JSON.parse(Buffer.concat(chunks).toString()).target_uri
-        return reply({resources:target.endsWith('/diary')?[{uri:target+'/public/public.md',abstract:'模拟日记',score:0.8}]:[]})
+        return reply({resources:target.endsWith('/diary')&&deleted.length===1?[{uri:target+'/public/public.md',abstract:'模拟日记',score:0.8}]:[]})
       }
       res.statusCode=404;res.end('{}')
     })
@@ -266,6 +284,7 @@ test('resource CLI rebuilds and searches only the active snapshot',async()=>{
     assert.doesNotMatch((await runDiary('find','记录')).stdout,/diary\/public/)
     const second=JSON.parse((await run('rebuild')).stdout).snapshots.diary;assert.equal(first.root,second.root)
     assert.equal(root,'viking://resources/whale/diary');assert.deepEqual(deleted,[root,root])
-    assert.match((await run('find','直播')).stdout,new RegExp(root))
+    assert.equal(uploads,1)
+    assert.doesNotMatch((await run('find','直播')).stdout,new RegExp(root))
   } finally {await new Promise(r=>server.close(r));fs.rmSync(home,{recursive:true,force:true})}
 })

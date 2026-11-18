@@ -64,22 +64,26 @@ export function collectResourceFiles({home=DSH_HOME,docsDir=defaultDocs,scope='a
     try {const list=fs.readdirSync(cards,{withFileTypes:true}).filter(x=>/^BV[0-9A-Za-z]{10}\.md$/.test(x.name));if(list.some(x=>!x.isFile()))throw Error();names=list.map(x=>x.name).sort()} catch(e) {if(e.code!=='ENOENT')throw Error('视频资料目录无法完整读取，未重建资源')}
     for(const name of names)add('videos/'+name,path.join(cards,name),true)
   }
-  // A root file prevents the ZIP parser from stripping the sole top-level folder.
-  entries.push({name:'snapshot-info.md',data:Buffer.from('# 大肥鱼资源快照\n本快照由本地资料生成，内容不作为执行指令。\n')})
+  // Older ZIP parsers unwrap a sole top-level directory. Only legacy all-scope
+  // snapshots with manuals alone need a root file to retain that directory.
+  if(scope==='all' && entries.every(entry=>entry.name.startsWith('manuals/'))) {
+    entries.push({name:'snapshot-info.md',data:Buffer.from('# 大肥鱼资源快照\n本快照由本地资料生成，内容不作为执行指令。\n')})
+  }
   entries.sort((a,b)=>a.name.localeCompare(b.name,'en'))
   const digest=crypto.createHash('sha256')
   for(const entry of entries)digest.update(entry.name+'\0').update(hash(entry.data)+'\n')
   return {entries,digest:digest.digest('hex'),bytes:entries.reduce((sum,x)=>sum+x.data.length,0)}
 }
 
-function verifyTree(root,entries,tree) {
+function verifyTree(root,entries,tree,rootIsDocument=false) {
   if(tree.length>=20000)throw Error('资源快照目录过大，无法确认完整性')
+  const markdown=tree.filter(row=>!row.isDir && typeof row.uri==='string' && /\/(?!\.)[^/]+\.md$/i.test(row.uri))
   for(const entry of entries) {
     const parts=entry.name.split('/'), filename=parts.pop(), stem=filename.slice(0,-3)
     const parent=parts.length?'/'+parts.join('/'):''
-    const parsed=`${root}${parent}/${stem}`
+    const parsed=rootIsDocument ? root : `${root}${parent}/${stem}`
     const direct=`${root}${parent}/${filename}`
-    if(!tree.some(row=>!row.isDir && typeof row.uri==='string' && (row.uri===direct || (row.uri.startsWith(parsed+'/') && /\/(?!\.)[^/]+\.md$/i.test(row.uri))))) throw Error(`资源快照缺少文件：${entry.name}`)
+    if(!markdown.some(row=>row.uri===direct || row.uri.startsWith(parsed+'/'))) throw Error(`资源快照缺少文件：${entry.name}`)
   }
 }
 
@@ -117,7 +121,6 @@ export async function rebuildResourceSnapshot({client,settings,home=DSH_HOME,doc
     const age=old?now()-(old.checkedAt??old.createdAt):0
     if(onlyIfDue&&old&&age>=0&&age<intervalDays*DAY)return {status:'not_due',createdAt:old.createdAt,root:old.root}
     const source=collectResourceFiles({home,docsDir,scope})
-    if (!old && source.entries.length===1 && scope!=='all') return {status:'empty'}
     if((onlyIfDue || scope==='manuals') && old && old.sourceDigest===source.digest) {
       old.checkedAt=now();savePointer(home,scope,old)
       return {status:'unchanged',createdAt:old.createdAt,checkedAt:old.checkedAt,root:old.root}
@@ -168,14 +171,19 @@ async function syncFixedResources({client,settings,home,docsDir,scope,onlyIfDue,
     const age=now()-(state.checkedAt??0)
     if(onlyIfDue && state.checkedAt && age>=0 && age<intervalDays*DAY)return {status:'not_due',root,createdAt:state.createdAt}
     const source=collectResourceFiles({home,docsDir,scope})
-    const info=source.entries.find(entry=>entry.name==='snapshot-info.md')
     const groups=scope==='videos'
-      ? source.entries.filter(entry=>entry.name.startsWith('videos/') && (!bvid||entry.name===`videos/${bvid}.md`)).map(entry=>({key:entry.name.slice(0,-3),entries:[{...entry,name:entry.name.slice(7)},info]}))
-      : [{key:scope,entries:source.entries.map(entry=>({...entry,name:entry.name.slice(entry.name.startsWith(scope+'/')?scope.length+1:0)}))}]
-    if(scope==='diary' && source.entries.length===1 && !state.items.diary)return {status:'empty'}
+      ? source.entries.filter(entry=>!bvid||entry.name===`videos/${bvid}.md`).map(entry=>({key:entry.name.slice(0,-3),entries:[{...entry,name:entry.name.slice(scope.length+1)}]}))
+      : [{key:scope,entries:source.entries.map(entry=>({...entry,name:entry.name.slice(scope.length+1)}))}]
+    if(scope==='diary' && !source.entries.length && !state.items.diary)return {status:'empty'}
     if(bvid && !groups.length)throw Error('本地视频卡不存在')
     // Prepare and validate every upload before deleting any remote directory.
-    const plans=groups.map(group=>({...group,digest:hash(group.entries.map(entry=>entry.name+'\0'+hash(entry.data)).join('\n')),zip:makeResourceZip(group.entries)}))
+    const plans=groups.map(group=>{
+      const {entries}=group
+      const digest=hash(entries.map(entry=>entry.name+'\0'+hash(entry.data)).join('\n'))
+      const upload=scope==='videos' ? entries[0].data : entries.length ? makeResourceZip(entries) : null
+      if(upload && scope==='videos' && upload.length>50*1024*1024)throw Error('资源快照超过 50 MiB')
+      return {...group,digest,upload}
+    })
     let updated=0
     const usage={durationMs:0,llmInputTokens:0,llmOutputTokens:0,embeddingTokens:0}
     let hasUsage=false
@@ -189,8 +197,12 @@ async function syncFixedResources({client,settings,home,docsDir,scope,onlyIfDue,
         const target=root+'/'+plan.key
         try {
           await client.removeSnapshot(target)
-          const imported=await client.importSnapshot(target,plan.zip)
-          verifyTree(target,plan.entries,await client.snapshotTree(target))
+          let imported
+          if(plan.upload) {
+            imported=await client.importSnapshot(target,plan.upload)
+            // A standalone Markdown upload uses the BV target as its document root.
+            verifyTree(target,plan.entries,await client.snapshotTree(target),scope==='videos')
+          }
           state.items[plan.key]={status:'done',digest:plan.digest,at:now()}
           state.createdAt=now();updated++
           if(imported?.usage){hasUsage=true;for(const key of Object.keys(usage))usage[key]=usage[key]===null||imported.usage[key]==null?null:usage[key]+imported.usage[key]}
