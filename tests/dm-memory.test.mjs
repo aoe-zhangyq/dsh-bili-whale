@@ -78,15 +78,16 @@ test('MID files merge both directions and sync all cached months into one stable
   assert.equal(remote.size,2)
 })
 
-test('checking an ambiguous append and monthly extraction use the same MID session',async t=>{
-  const {home}=setup(t),remote=[],extracted=[]
+test('scheduled extraction uploads missing cache entries first and uses the same MID session',async t=>{
+  const {home}=setup(t),remote=[],extracted=[],operations=[]
   let clock=Date.parse('2026-11-15T04:59:59+08:00'),loseResponse=true
   const client={sessionMessages:async()=>remote.map(row=>row.message.content),
     async appendMessage(id,message){
+      operations.push('append')
       remote.push({id,message})
       if (loseResponse) {loseResponse=false;throw Error('response lost')}
     },
-    async extractSession(id){extracted.push(id)},
+    async extractSession(id){operations.push('extract');extracted.push(id)},
   }
   const sync=extract=>syncDmHistory({home,settings,client,now:()=>clock,extract})
   const record=key=>recordDmHistory('200',[{key,sender:'200',ts:clock/1000,type:1,text:key}],{home})
@@ -98,12 +99,36 @@ test('checking an ambiguous append and monthly extraction use the same MID sessi
   assert.equal((await sync(true)).extracted,1)
   assert.equal((await sync(true)).extracted,0)
   clock=Date.parse('2026-12-01T04:59:59+08:00')
-  await record('second');assert.equal((await sync()).uploaded,1)
-  assert.equal((await sync(true)).extracted,0)
+  await record('second')
+  assert.equal((await sync(true)).uploaded,0)
+  assert.equal(remote.length,1)
   clock+=1000
-  assert.equal((await sync(true)).extracted,1)
+  const scheduled=await sync(true)
+  assert.deepEqual([scheduled.uploaded,scheduled.extracted],[1,1])
+  assert.deepEqual(operations,['append','extract','append','extract'])
   assert.deepEqual(extracted,[remote[0].id,remote[0].id])
   assert.equal(remote[1].id,remote[0].id)
+  await record('third')
+  assert.equal((await sync(true)).uploaded,0)
+  assert.equal(remote.length,2)
+})
+
+test('a failed scheduled append is reconciled before extracting that MID',async t=>{
+  const {home}=setup(t),messages=[]
+  let extracted=0
+  const clock=Date.parse('2026-11-15T05:00:00+08:00')
+  await recordDmHistory('200',[{key:'first',sender:'200',ts:clock/1000,type:1,text:'test'}],{home})
+  const client={
+    async sessionMessages(){return messages},
+    async appendMessage(id,message){messages.push(message.content);throw Error('response lost')},
+    async extractSession(){extracted++},
+  }
+  const run=()=>syncDmHistory({home,settings,client,now:()=>clock,extract:true})
+  assert.equal((await run()).failed,1)
+  assert.equal(extracted,0)
+  assert.equal((await run()).extracted,1)
+  assert.equal(messages.length,1)
+  assert.equal((await run()).extracted,0)
 })
 
 
