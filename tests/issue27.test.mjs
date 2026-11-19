@@ -77,16 +77,14 @@ test('DSH rotation continues without an OV extraction job',async t=>{
   fs.writeFileSync(path.join(f.dir,'whale-openviking.json'),JSON.stringify(settings))
   const operations=[],create=f.args.controller.create
   f.args.controller.create=async request=>{operations.push('create');return create(request)}
-  t.mock.method(globalThis,'fetch',async url=>{
-    assert.match(url,/\/search\/find$/)
-    return {ok:true,json:async()=>({status:'ok',result:{memories:[]}})}
-  })
+  const network=t.mock.method(globalThis,'fetch',async()=>{throw Error('unexpected request')})
   const delivery=f.make();await delivery.send(f.request)
   operations.length=0
   f.advance(86400001)
   await delivery.send(f.request)
   assert.deepEqual(operations,['create'])
   assert.equal(f.created.length,2);assert.equal(f.sent.length,2)
+  assert.equal(network.mock.callCount(),0)
   assert.equal(fs.existsSync(path.join(f.dir,'whale-memory-extractions')),false)
   assert.notEqual(f.sent.at(-1).sessionId,'bili-whale')
 })

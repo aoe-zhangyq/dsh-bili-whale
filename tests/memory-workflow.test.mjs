@@ -116,13 +116,13 @@ test('public delivery uses a separate persisted session, no remote lookup and no
     const cfg={controller:{create:async()=>{},prompt:async request=>prompts.push(request)},dshHome:options.home,cwd:options.home,sessionId:'private-session',config:()=>({personaOncePerSession:true}),persona:()=>''}
     const delivery=createSessionDelivery(cfg)
     await delivery.send({content:[{type:'text',text:'private'}]})
-    const before=remote
-    await delivery.send({content:[{type:'text',text:'public'}]},undefined,{recallAudience:'public',recallMids:['123']})
-    assert.equal(remote,before);assert.notEqual(prompts[0].sessionId,prompts[1].sessionId)
+    await delivery.send({content:[{type:'text',text:'public'}]},undefined,{audience:'public'})
+    assert.equal(remote,0);assert.notEqual(prompts[0].sessionId,prompts[1].sessionId)
     assert.doesNotMatch(prompts[1].content[0].text,/whale-diary-private\.md/)
-    assert.match(prompts[1].content[0].text,/--audience public/)
+    assert.match(prompts[1].content[0].text,/只依据已核实的公开材料/)
+    assert.doesNotMatch(prompts[1].content[0].text,/memory recall|OpenViking|公开互动证据/)
     const restarted=createSessionDelivery(cfg)
-    await restarted.send({content:[{type:'text',text:'public again'}]},undefined,{recallAudience:'public'})
+    await restarted.send({content:[{type:'text',text:'public again'}]},undefined,{audience:'public'})
     assert.equal(prompts[2].sessionId,prompts[1].sessionId)
   } finally {globalThis.fetch=original;if(previous===undefined)delete process.env.WHALE_OPENVIKING_API_KEY;else process.env.WHALE_OPENVIKING_API_KEY=previous}
 })
