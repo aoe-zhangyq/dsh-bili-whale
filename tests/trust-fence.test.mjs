@@ -134,7 +134,7 @@ test('private message sync requires authorization and reports background reconci
   assert.fail('私信同步未完成')
 })
 
-test('dated DM sync continues past a 30-message page reporting has_more=0 and resumes after interruption',async t=>{
+test('dated DM sync pages toward older messages past a 30-message page and resumes after interruption',async t=>{
   const route='openviking/dm-sync',host='127.0.0.1',routes=mount({requestRejection:()=>undefined})
   const settings=path.join(dshHome,'whale-openviking.json')
   const config=process.env.BILI_WHALE_CONFIG
@@ -162,7 +162,8 @@ test('dated DM sync continues past a 30-message page reporting has_more=0 and re
     const reply=result=>new Response(JSON.stringify({status:'ok',result}))
     if (url.pathname.endsWith('/nav')) return new Response(JSON.stringify({code:0,data:{mid:111,wbi_img:{img_url:'https://i.example/7cd084941338484aae1ad9425b84077c.png',sub_url:'https://i.example/4932caff0ff746eab6f01bf08b70ac45.png'}}}))
     if (url.pathname.endsWith('/fetch_session_msgs')) {
-      const mid=url.searchParams.get('talker_id'),cursor=Number(url.searchParams.get('begin_seqno'))
+      const mid=url.searchParams.get('talker_id'),cursor=Number(url.searchParams.get('end_seqno'))
+      const after=Number(url.searchParams.get('begin_seqno'))
       peers.add(mid)
       if (mid==='123'||mid==='789') return new Response(JSON.stringify({code:0,data:{messages:null,has_more:0}}))
       assert.equal(mid,'456')
@@ -170,7 +171,8 @@ test('dated DM sync continues past a 30-message page reporting has_more=0 and re
       if (cursor===4 && interrupt) return new Response(JSON.stringify({code:-1}),{status:503})
       const seq=cursor===0?(interrupt?43:45):cursor-1
       const row=n=>({msg_key:String(n),msg_seqno:n,sender_uid:n===13?111:456,timestamp:n>=14?since+10*86400+n:since+n-1,content:`私信 ${n}`})
-      const messages=cursor===0?Array.from({length:30},(_,i)=>row(seq-i)):seq===1?[row(1),row(0)]:[row(seq)]
+      let messages=cursor===0?Array.from({length:30},(_,i)=>row(seq-i)):seq===1?[row(1),row(0)]:[row(seq)]
+      if(after) messages=messages.filter(message=>message.msg_seqno>after)
       return new Response(JSON.stringify({code:0,data:{messages,has_more:0}}))
     }
     const id=url.pathname.split('/')[4]

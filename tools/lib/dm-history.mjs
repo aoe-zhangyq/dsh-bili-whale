@@ -23,7 +23,8 @@ export async function readHistoryIdentity(headers) {
 }
 
 export async function readHistoryPage(owner,headers,wbi,cursor,signal) {
-  const query=signWbi({talker_id:owner,session_type:1,size:30,begin_seqno:cursor},wbi)
+  // The latest page has no bound. end_seqno selects messages older than the cursor.
+  const query=signWbi({talker_id:owner,session_type:1,size:30,...(cursor==='0'?{}:{end_seqno:cursor})},wbi)
   const response=await fetch('https://api.vc.bilibili.com/svr_sync/v1/svr_sync/fetch_session_msgs?'+query,{headers,signal})
   const body=await exactJson(response)
   const messages=body.data?.messages, more=body.data?.has_more
