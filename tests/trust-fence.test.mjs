@@ -134,7 +134,7 @@ test('private message sync requires authorization and reports background reconci
   assert.fail('私信同步未完成')
 })
 
-test('dated private message sync backfills beyond ten pages and resumes the local archive',async t=>{
+test('dated DM sync continues past a 30-message page reporting has_more=0 and resumes after interruption',async t=>{
   const route='openviking/dm-sync',host='127.0.0.1',routes=mount({requestRejection:()=>undefined})
   const settings=path.join(dshHome,'whale-openviking.json')
   const config=process.env.BILI_WHALE_CONFIG
@@ -164,13 +164,14 @@ test('dated private message sync backfills beyond ten pages and resumes the loca
     if (url.pathname.endsWith('/fetch_session_msgs')) {
       const mid=url.searchParams.get('talker_id'),cursor=Number(url.searchParams.get('begin_seqno'))
       peers.add(mid)
-      if (mid==='123'||mid==='789') return new Response(JSON.stringify({code:0,data:{messages:[],has_more:0}}))
+      if (mid==='123'||mid==='789') return new Response(JSON.stringify({code:0,data:{messages:null,has_more:0}}))
       assert.equal(mid,'456')
       cursors.push(cursor)
       if (cursor===4 && interrupt) return new Response(JSON.stringify({code:-1}),{status:503})
-      const seq=cursor===0?(interrupt?14:16):cursor-1
-      const row=n=>({msg_key:String(n),msg_seqno:n,sender_uid:n===13?111:456,timestamp:since+n-1,content:`私信 ${n}`})
-      return new Response(JSON.stringify({code:0,data:{messages:seq===1?[row(1),row(0)]:[row(seq)],has_more:1}}))
+      const seq=cursor===0?(interrupt?43:45):cursor-1
+      const row=n=>({msg_key:String(n),msg_seqno:n,sender_uid:n===13?111:456,timestamp:n>=14?since+10*86400+n:since+n-1,content:`私信 ${n}`})
+      const messages=cursor===0?Array.from({length:30},(_,i)=>row(seq-i)):seq===1?[row(1),row(0)]:[row(seq)]
+      return new Response(JSON.stringify({code:0,data:{messages,has_more:0}}))
     }
     const id=url.pathname.split('/')[4]
     if (url.pathname.endsWith('/context')) return reply({messages:remote.get(id)||[]})
@@ -195,19 +196,20 @@ test('dated private message sync backfills beyond ten pages and resumes the loca
   const first=await run()
   assert.equal(first.phase,'partial')
   assert.equal(first.history.failed,1)
-  assert.equal(JSON.parse(fs.readFileSync(path.join(cache,'456.json'))).messages.length,11)
+  assert.equal(JSON.parse(fs.readFileSync(path.join(cache,'456.json'))).messages.length,40)
   const before=cursors.length
   interrupt=false
   const second=await run()
   assert.equal(second.phase,'done')
   assert.ok(peers.has('789'))
+  assert.equal(second.history.endedEarly,peers.size-1)
   assert.deepEqual(cursors.slice(before),[0,16,15,4,3,2])
   const local=JSON.parse(fs.readFileSync(path.join(cache,'456.json')))
   assert.equal(local.backfill,undefined)
-  assert.equal(local.messages.length,16)
+  assert.equal(local.messages.length,45)
   assert.ok(local.messages.some(row=>row.key==='1' && row.at===new Date(since*1000).toISOString()))
   assert.equal(local.messages.find(row=>row.key==='13').role,'assistant')
-  assert.equal([...remote].find(([id])=>id.startsWith('whale-dm-456-'))[1].length,16)
+  assert.equal([...remote].find(([id])=>id.startsWith('whale-dm-456-'))[1].length,45)
   assert.equal(fs.existsSync(path.join(home,'.bili-ai','dm-await-state.json')),false)
 })
 

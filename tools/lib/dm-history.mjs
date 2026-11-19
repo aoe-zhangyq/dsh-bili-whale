@@ -26,17 +26,27 @@ export async function readHistoryPage(owner,headers,wbi,cursor,signal) {
   const query=signWbi({talker_id:owner,session_type:1,size:30,begin_seqno:cursor},wbi)
   const response=await fetch('https://api.vc.bilibili.com/svr_sync/v1/svr_sync/fetch_session_msgs?'+query,{headers,signal})
   const body=await exactJson(response)
-  if(!response.ok||body.code!==0||!Array.isArray(body.data?.messages))throw Error('私信历史读取失败，保留游标（code='+body.code+'）')
-  const rows=body.data.messages.map(normalizeMessage), more=body.data.has_more
-  return {rows,exhausted:more===0||more==='0'||more===false||(more===undefined&&rows.length<30)}
+  const messages=body.data?.messages, more=body.data?.has_more
+  const terminal=more===0||more==='0'||more===false
+  if(!response.ok||body.code!==0||(!Array.isArray(messages)&&!(terminal&&messages==null)))throw Error('私信历史读取失败，保留游标（code='+body.code+'）')
+  const rows=(messages??[]).map(normalizeMessage)
+  return {rows,exhausted:terminal||(more===undefined&&rows.length<30)}
+}
+
+export function oldestHistoryRow(rows) {
+  let oldest
+  for (const row of rows) {
+    if (row.seq && (!oldest || BigInt(row.seq)<BigInt(oldest.seq))) oldest=row
+  }
+  return oldest
 }
 
 export function nextHistoryCursor(rows,cursor) {
-  const seqs=rows.filter(r=>r.seq).map(r=>BigInt(r.seq))
-  if(!seqs.length)throw Error('私信历史分页缺少序号，保留游标')
-  const next=seqs.reduce((a,b)=>a<b?a:b).toString()
-  if(next===cursor||(cursor!=='0'&&BigInt(next)>=BigInt(cursor)))throw Error('私信历史分页未前进，保留游标')
-  return next
+  const oldest=oldestHistoryRow(rows)
+  if(!oldest)throw Error('私信历史分页缺少序号，保留游标')
+  const next=BigInt(oldest.seq)
+  if(next===0n||(cursor!=='0'&&next>=BigInt(cursor)))throw Error('私信历史分页未前进，保留游标')
+  return next.toString()
 }
 
 export async function readHistory(owner,headers,state,{baseline=false}={}) {
