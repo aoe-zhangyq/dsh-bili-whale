@@ -208,7 +208,7 @@ test('dated DM sync pages toward older messages past a 30-message page and resum
   assert.deepEqual(cursors.slice(before),[0,16,15,4,3,2])
   const local=JSON.parse(fs.readFileSync(path.join(cache,'456.json')))
   assert.equal(local.backfill,undefined)
-  assert.equal(local.messages.length,45)
+  assert.deepEqual(local.messages.map(row=>row.key),Array.from({length:45},(_,index)=>String(index+1)))
   assert.ok(local.messages.some(row=>row.key==='1' && row.at===new Date(since*1000).toISOString()))
   assert.equal(local.messages.find(row=>row.key==='13').role,'assistant')
   assert.equal([...remote].find(([id])=>id.startsWith('whale-dm-456-'))[1].length,45)

@@ -60,6 +60,12 @@ test('MID files merge both directions and sync all cached months into one stable
   const nov={...oct,key:'2',sender:'100',ts:Date.parse('2026-11-01T08:00:00Z')/1000,text:'十一月回复'}
   await Promise.all([record('200',[oct]),record('200',[nov,oct]),record('300',[{...oct,sender:'300'}])])
   assert.deepEqual(fs.readdirSync(path.join(home,'whale-dm-history')).sort(),['200.json','300.json'])
+  const file=path.join(home,'whale-dm-history','200.json')
+  const cache=JSON.parse(fs.readFileSync(file,'utf8'))
+  assert.deepEqual(cache.messages.map(row=>row.key),['1','2'])
+  fs.writeFileSync(file,JSON.stringify({...cache,messages:[...cache.messages].reverse()}))
+  await record('200',[nov,oct])
+  assert.deepEqual(JSON.parse(fs.readFileSync(file,'utf8')),cache)
   const sync=()=>syncDmHistory({home,settings,client})
   assert.deepEqual(await sync(),{sessions:2,entries:3,uploaded:3,extracted:0,failed:0})
   const id=appends[0]
