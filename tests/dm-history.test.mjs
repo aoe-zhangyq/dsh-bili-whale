@@ -24,6 +24,8 @@ test('real CLI queues consecutive owner messages chronologically despite own lat
  assert.equal(b.run('--ack',a.receipt).status,0);const c=b.peek();assert.equal(c.text,'message 2')
  assert.equal(fs.readFileSync(b.log,'utf8'),network);assert.equal(b.run('--ack',c.receipt).status,0)
  assert.equal(b.run('--once','--peek').status,1);assert.equal(b.read().lastSeen,1001)
+ const cache=JSON.parse(fs.readFileSync(path.join(b.home,'.dsh','whale-dm-history','222.json'),'utf8'))
+ assert.deepEqual(cache.messages.map(({key,role})=>[key,role]),[['1','user'],['2','user'],['3','assistant']])
 })
 test('same-second IDs deduplicate across restart and page overlaps',t=>{
  const b=box(t);b.save({owner:'222',lastSeen:1000,lastKey:'1'});b.put({pages:{0:page([row(3),row(2)],1),2:page([row(2),row(1)],0)}})
@@ -73,6 +75,9 @@ test('withdrawal and nontext events are not chat; revoked text in fetched batch 
  b.put(page([{...row(5,1004),msg_type:5,content:'"1"'},{...row(4,1003),msg_type:2},row(3,1002),row(2,1001,111),row(1,1000)]))
  const hit=b.peek();assert.equal(hit.key,'3');assert.equal(b.read().lastIncoming,1002)
  assert.equal(b.run('--ack',hit.receipt).status,0);assert.equal(b.run('--peek').status,1)
+ const cache=JSON.parse(fs.readFileSync(path.join(b.home,'.dsh','whale-dm-history','222.json'),'utf8'))
+ assert.deepEqual(cache.messages.map(({key})=>key),['2','3','4'])
+ assert.deepEqual(cache.withdrawn,['1'])
 })
 
 test('baseline does not count old messages as fresh owner feedback',t=>{

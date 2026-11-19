@@ -18,7 +18,8 @@ import crypto from 'node:crypto'
 import { config } from '../lib/config.mjs'
 import { validateShare } from '../lib/share-policy.mjs'
 import { gate, record } from '../lib/quota-gate.mjs'
-import { recordDmMemory } from '../../lib/dm-memory.js'
+import { recordDmHistory } from '../../lib/dm-history-sync.js'
+import { exactJson } from '../lib/json-exact.mjs'
 
 // 稳定的设备 ID：只生成一次，之后永远复用 ✓
 //   · 存在 ~/.bili-ai/dev_id（0600）
@@ -157,7 +158,7 @@ async function send(toMid, text) {
     headers: { ...H, 'content-type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
   })
-  const j = await r.json().catch(() => ({}))
+  const j = await exactJson(r).catch(() => ({}))
   return { http: r.status, code: j.code, message: j.message, data: j.data }
 }
 
@@ -221,8 +222,11 @@ if (SHARE) {
 if (DRY) { console.log('  [dry] 预检通过，未发送 ✓ 正式发送时会重新检查额度'); process.exit(0) }
 const r = await send(ONLY_TO, MSG)
 if (r.code === 0) {
-  try { recordDmMemory({ owner: ONLY_TO, name: OWNER_NAME, role: 'assistant', content: MSG, createdAt: Date.now(), key: crypto.randomUUID() }) }
-  catch (e) { console.error('私信已发送，但记忆本地记录失败：' + e.message) }
+  const key = r.data?.msg_key_str ?? r.data?.msg_key
+  // A history read will pick up sends whose response omits a platform key.
+  if (key) try {
+    await recordDmHistory(ONLY_TO,[{key:String(key),sender:meInfo.mid,ts:Date.now()/1000,type:1,text:MSG}],{selfMid:meInfo.mid,name:OWNER_NAME})
+  } catch (e) { console.error('私信已发送，本地历史将在下次读取时补录：' + e.message) }
   saveQ({ date: today(), count: used + 1, mid: ONLY_TO, at: new Date().toISOString() })
   if (SHARE) record({ type: 'dm', target: SHARE_TARGET, note: MSG.slice(0, 40), auto: true, share: true })
   console.log(`  ✓ 已发送（HTTP ${r.http}）${SHARE ? ' · 已记入分享额度 ✓' : ' · 推送不占额度 ✓'}`)

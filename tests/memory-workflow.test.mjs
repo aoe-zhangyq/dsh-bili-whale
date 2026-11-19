@@ -6,7 +6,7 @@ import path from 'node:path'
 import {spawnSync} from 'node:child_process'
 import {fileURLToPath} from 'node:url'
 import {createOpenViking} from '../lib/openviking.js'
-import {recordDmMemory,recordExperience,recordCommentMessage,flushDmMemory} from '../lib/dm-memory.js'
+import {recordDmMemory,recordExperience,recordCommentMessage} from '../lib/dm-memory.js'
 import {readPublicMemory,recallPublicMemory} from '../lib/public-memory.js'
 import {createSessionDelivery} from '../lib/session-delivery.js'
 
@@ -51,7 +51,7 @@ test('structured experiences retain occurrence time, participants and stable IDs
   assert.equal(current.createdAt,new Date(at).toISOString());assert.equal(current.source.time_basis,'submission')
 })
 
-test('public lookup reads only retained platform comments, including sent events, with strict tenant and MID bounds',async t=>{
+test('public lookup reads only retained platform comments, with strict tenant and MID bounds',t=>{
   const options=setup(t)
   recordDmMemory({owner:'123',role:'user',content:'私密鲸鱼暗号',key:'secret',createdAt:at},options)
   const base={type:1,oid:'456',root:'789',createdAt:at}
@@ -59,25 +59,12 @@ test('public lookup reads only retained platform comments, including sent events
   recordCommentMessage({...base,mid:'234',id:'112',content:'另一个人公开讨论'},options)
   recordDmMemory({owner:'123',group:'manual',channel:'comment',role:'user',content:'伪装成公开的手动材料',key:'manual',createdAt:at,
     source:{channel:'comment',visibility:'public',verification:'manual',person:{mid:'123'}}},options)
-  await flushDmMemory({...options,channel:'comment',client:{appendMessage:async()=>{},extractSession:async()=>{}}})
   const found=recallPublicMemory('鲸鱼',{...options,mid:'123'})
   assert.equal(found.length,1);assert.equal(found[0].content,'公开鲸鱼讨论')
   assert.equal(readPublicMemory(found[0].uri,options).content,'公开鲸鱼讨论')
   assert.throws(()=>readPublicMemory(found[0].uri,{...options,settings:{...settings,account:'other'}}),/租户/)
   assert.throws(()=>readPublicMemory('viking://user/whale/memories/profile.md',options),/URI/)
   assert.throws(()=>recallPublicMemory('鲸鱼',{...options,mid:'../123'}),/MID/)
-})
-
-test('failed extraction is not retried while idle; new messages reuse the session after restart',async t=>{
-  const options=setup(t);let clock=at,calls=[]
-  const opts={...options,extractIdle:true,now:()=>clock,client:{appendMessage:async(id,message)=>calls.push({type:'append',id,message}),extractSession:async id=>{calls.push({type:'extract',id});throw Error('lost response')}}}
-  recordDmMemory({owner:'123',role:'user',content:'first',key:'first',createdAt:clock},opts)
-  await flushDmMemory(opts);clock+=300000;await flushDmMemory(opts);await flushDmMemory(opts)
-  recordDmMemory({owner:'123',role:'user',content:'second',key:'second',createdAt:clock},opts)
-  await flushDmMemory({...opts});clock+=300000;await flushDmMemory(opts)
-  assert.equal(calls[0].id,calls[2].id)
-  assert.equal(calls.filter(call=>call.type==='extract' && call.id===calls[0].id).length,2)
-  assert.equal(calls.filter(call=>call.type==='append' && call.id===calls[0].id).length,2)
 })
 
 test('MID recall reads exact full identity then searches only that MID preferences and rejects stray results',async()=>{

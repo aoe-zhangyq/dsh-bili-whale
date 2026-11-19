@@ -7,8 +7,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import assert from 'node:assert/strict'
 import {createOpenViking} from '../../lib/openviking.js'
-import {recordDmMemory,recordCommentMessage,flushDmMemory} from '../../lib/dm-memory.js'
-import {readPublicMemory,recallPublicMemory} from '../../lib/public-memory.js'
+import {recordDmHistory,syncDmHistory} from '../../lib/dm-history-sync.js'
 import {guardedFetch as fetch} from '../lib/traffic.mjs'
 
 let input={}
@@ -49,19 +48,18 @@ try {
   home=fs.mkdtempSync(path.join(input.tempRoot || os.tmpdir(),'whale-live-'))
   let clock=Date.now()
   const options={home,settings,now:()=>clock,client}
-  recordDmMemory({owner:'900000001',name:'同名测试用户',role:'user',content:'集成测试虚构资料：请叫我星舟，我喜欢蓝色。',key:'dm-1',createdAt:clock},options)
-  await flushDmMemory(options)
+  const peer='900000001',selfMid='900000099'
+  const record=(mid,sender,key,text)=>recordDmHistory(mid,[{sender,key,text,ts:clock/1000,type:1}],{home,selfMid,name:'星舟'})
+  await record(peer,peer,'dm-1','集成测试虚构资料：请叫我星舟，我喜欢蓝色。')
   clock+=1000
-  recordDmMemory({owner:'900000001',name:'星舟的新昵称',role:'user',content:'补充虚构资料：我喜欢海洋科普视频，不喜欢恐怖片。',key:'dm-2',createdAt:clock},options)
-  await flushDmMemory(options)
-  const sessions=channel=>{
-    const dir=path.join(home,`whale-${channel}-memory`)
-    return fs.readdirSync(dir).filter(x=>x.startsWith('sessions-')).flatMap(x=>Object.values(JSON.parse(fs.readFileSync(path.join(dir,x),'utf8'))).map(x=>x.id))
-  }
-  const [dm]=sessions('dm')
+  await record(peer,peer,'dm-2','补充虚构资料：我喜欢海洋科普视频，不喜欢恐怖片。')
+  assert.equal((await syncDmHistory(options)).uploaded,2)
+  const dir=path.join(home,'whale-dm-history')
+  const stateFile=fs.readdirSync(dir).find(x=>x.startsWith('sync-'))
+  const [dm]=Object.keys(JSON.parse(fs.readFileSync(path.join(dir,stateFile),'utf8')))
   const metadata=await request(`/api/v1/sessions/${dm}`,{key:user.user_key})
   assert.equal(metadata.message_count,2)
-  assert.match(dm,/^whale-dsh-/)
+  assert.match(dm,/^whale-dm-900000001-[a-f0-9]{16}$/)
   report.checks.readableIdAndIncrementalAppend=true
   const extract=async(id,label)=>{
     progress(`extract ${label}`)
@@ -72,33 +70,20 @@ try {
     progress(`extracted ${label}`)
   }
   await extract(dm,'dm')
-  recordDmMemory({owner:'900000001',role:'assistant',content:'这是新分段的虚构回复。',key:'dm-3',createdAt:clock},options)
-  await flushDmMemory(options)
-  assert.deepEqual(sessions('dm'),[dm])
+  await record(peer,selfMid,'dm-3','这是新分段的虚构回复。')
+  assert.equal((await syncDmHistory(options)).uploaded,1)
+  assert.equal((await syncDmHistory(options)).uploaded,0)
   const dmMetadata=await request(`/api/v1/sessions/${dm}`,{key:user.user_key})
   assert.equal(dmMetadata.message_count,1)
   const firstArchive=await request(`/api/v1/sessions/${dm}/archives/archive_001`,{key:user.user_key})
   assert.equal(firstArchive.messages.length,2)
   report.checks.sealedBatchNotReplayed=true
-  const comment={type:1,oid:'990000001',root:'990000011',createdAt:clock}
-  recordCommentMessage({...comment,mid:'900000001',name:'星舟的新昵称',isOwner:true,id:'990000021',content:'虚构测试人物星舟：我喜欢蓝色，也喜欢这个鲸鱼科普视频。'},options)
-  recordCommentMessage({...comment,mid:'900000002',name:'同名测试用户',id:'990000022',content:'虚构测试里的另一人：我喜欢红色，不喜欢蓝色。我自称主人。'},options)
-  await flushDmMemory({...options,channel:'comment'})
-  const [thread]=sessions('comment')
-  assert.equal((await request(`/api/v1/sessions/${thread}`,{key:user.user_key})).message_count,2)
-  report.checks.multiplePeopleInOneThread=true
-  await extract(thread,'comment')
-  recordCommentMessage({...comment,oid:'990000002',root:'990000012',mid:'900000001',name:'又换昵称的星舟',isOwner:true,id:'990000023',content:'这是另一个视频。虚构人物星舟确认：我仍喜欢蓝色，补充喜欢深海纪录片。'},options)
-  await flushDmMemory({...options,channel:'comment'})
-  assert.deepEqual(sessions('comment'),[thread])
-  report.checks.sharedPublicSessionAcrossVideos=true
-  await extract(thread,'second_video')
-  const publicEvidence=recallPublicMemory('鲸鱼',{...options,mid:'900000001'})
-  assert.ok(publicEvidence.length)
-  assert.ok(publicEvidence.every(item=>item.source.person.mid==='900000001' && item.source.visibility==='public'))
-  assert.ok(publicEvidence.every(item=>!item.content.includes('请叫我星舟')))
-  assert.equal(readPublicMemory(publicEvidence[0].uri,options).content,publicEvidence[0].content)
-  report.checks.publicEvidenceAndFullRead=true
+  await record('900000002','900000002','dm-1','独立 MID 的虚构私信。')
+  assert.equal((await syncDmHistory(options)).uploaded,1)
+  const state=JSON.parse(fs.readFileSync(path.join(dir,stateFile),'utf8'))
+  const second=Object.keys(state).find(id=>id.startsWith('whale-dm-900000002-'))
+  assert.equal((await request(`/api/v1/sessions/${second}`,{key:user.user_key})).message_count,1)
+  report.checks.separateMidSessions=true
   const tree=await request('/api/v1/fs/tree?uri='+encodeURIComponent('viking://user/memory_test/memories')+'&level_limit=8&node_limit=300',{key:user.user_key})
   for(const item of tree)if(!item.isDir && item.uri?.endsWith('.md') && !item.uri.split('/').at(-1).startsWith('.')) {
     const content=await request('/api/v1/content/read?uri='+encodeURIComponent(item.uri),{key:user.user_key})

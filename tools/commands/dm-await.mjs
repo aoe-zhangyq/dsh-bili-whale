@@ -5,7 +5,7 @@ import crypto from 'node:crypto'
 import {config} from '../lib/config.mjs'
 import {readHistory} from '../lib/dm-history.mjs'
 import {acquireProcessLock} from '../lib/process-lock.mjs'
-import {recordDmMemory} from '../../lib/dm-memory.js'
+import {recordDmHistory} from '../../lib/dm-history-sync.js'
 const argv=process.argv.slice(2),peek=argv.includes('--peek'),json=argv.includes('--json')
 const owner=String(config().owner?.mid??'').trim(),name=String(config().owner?.name??'主人')
 const home=process.env.USERPROFILE||process.env.HOME||'/'
@@ -19,8 +19,6 @@ function acknowledge(state,message) {
   return {...state,owner,lastSeen:message.ts,lastKey:message.key,lastKeys:[...new Set([...(same?(state.lastKeys??(state.lastKey?[state.lastKey]:[])):[]),message.key])],pending:undefined,queue:state.queue??[],at:new Date().toISOString()}
 }
 function emit(message){
-  try { recordDmMemory({owner,name,role:'user',content:message.text,createdAt:Number(message.ts)*1000,key:message.key}) }
-  catch(e) { console.error('私信记忆本地记录失败：'+e.message) }
   console.log(json?JSON.stringify(message):'DM_HIT mid='+owner+' text='+message.text)
 }
 async function main(){
@@ -41,6 +39,7 @@ async function main(){
     const cred=JSON.parse(fs.readFileSync(path.join(home,'.bili-ai/credentials.json'),'utf8'))
     const headers={'user-agent':'Mozilla/5.0',referer:'https://www.bilibili.com/',cookie:'SESSDATA='+cred.sessdata+'; bili_jct='+cred.bili_jct+'; buvid3='+cred.buvid3}
     const result=await readHistory(owner,headers,state,{baseline:argv.includes('--baseline')})
+    await recordDmHistory(owner,result.all,{selfMid:result.selfMid,name})
     if(argv.includes('--baseline')){
       const latest=result.all.at(-1),ts=latest?.ts??0
       save({owner,lastSeen:ts,lastKey:latest?.key,lastKeys:result.all.filter(r=>r.ts===ts).map(r=>r.key),lastIncoming:state.lastIncoming,queue:[]})

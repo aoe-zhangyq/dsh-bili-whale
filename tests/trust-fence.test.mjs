@@ -97,18 +97,19 @@ test('OpenViking settings reject untrusted or unauthenticated requests', async (
   assert.equal((await request(mount(undefined),'openviking',{host:'127.0.0.1',method:'POST',body})).status,503)
 })
 
-test('diary sync requires authorization and reports background reconciliation', async t => {
-  const route = 'openviking/diary-sync', host = '127.0.0.1'
+test('private message sync requires authorization and reports background reconciliation', async t => {
+  const route = 'openviking/dm-sync', host = '127.0.0.1'
   assert.equal((await request(mount({requestRejection:()=>401}),route,{host,method:'POST'})).status,401)
   const routes = mount({requestRejection:()=>undefined})
   const file = path.join(dshHome,'whale-openviking.json')
   fs.writeFileSync(file,JSON.stringify({url:'http://127.0.0.1:1933',account:'test',user:'whale',key:'test'}))
   t.after(()=>fs.rmSync(file,{force:true}))
-  const {archiveDiary} = await import('../lib/diary-memory.js')
-  archiveDiary({book:'private',at:'2099-01-01T00:00:00+08:00',content:'fixture'},{home:dshHome})
+  const {recordDmHistory} = await import('../lib/dm-history-sync.js')
+  await recordDmHistory('123',[{sender:'123',ts:1700000000,key:'route-fixture',type:1,text:'fixture'}],{home:dshHome})
   let finish, reads=0, writes=0
   const pending = new Promise(resolve=>{finish=resolve})
   t.mock.method(globalThis,'fetch',async url=>{
+    assert.match(url,/\/sessions\/whale-dm-123-/)
     if (url.includes('/context?')) {reads++;await pending}
     if (url.endsWith('/messages')) writes++
     return {ok:true,json:async()=>({status:'ok',result:{messages:[],commit_count:0}})}
@@ -130,7 +131,84 @@ test('diary sync requires authorization and reports background reconciliation', 
     }
     await new Promise(resolve=>setImmediate(resolve))
   }
-  assert.fail('日记补传未完成')
+  assert.fail('私信同步未完成')
+})
+
+test('dated private message sync backfills beyond ten pages and resumes the local archive',async t=>{
+  const route='openviking/dm-sync',host='127.0.0.1',routes=mount({requestRejection:()=>undefined})
+  const settings=path.join(dshHome,'whale-openviking.json')
+  const config=process.env.BILI_WHALE_CONFIG
+  const credentials=path.join(home,'.bili-ai','credentials.json')
+  const cache=path.join(dshHome,'whale-dm-history')
+  fs.mkdirSync(path.dirname(credentials),{recursive:true})
+  fs.writeFileSync(credentials,JSON.stringify({sessdata:'test'}))
+  fs.writeFileSync(settings,JSON.stringify({url:'http://127.0.0.1:1933',account:'dated',user:'whale',key:'test'}))
+  const previous=fs.existsSync(config)?fs.readFileSync(config):null
+  fs.writeFileSync(config,JSON.stringify({owner:{mid:'456',name:'联系人'}}))
+  t.after(()=>{
+    if(previous)fs.writeFileSync(config,previous);else fs.rmSync(config,{force:true})
+    fs.rmSync(settings,{force:true});fs.rmSync(credentials,{force:true})
+  })
+  const {recordDmHistory}=await import('../lib/dm-history-sync.js')
+  await recordDmHistory('789',[{sender:'789',ts:1700000000,key:'older-cached',type:1,text:'fixture'}],{home:dshHome})
+  const trafficTest=process.env.BILI_TRAFFIC_TEST
+  process.env.BILI_TRAFFIC_TEST='1'
+  t.after(()=>{if(trafficTest===undefined)delete process.env.BILI_TRAFFIC_TEST;else process.env.BILI_TRAFFIC_TEST=trafficTest})
+  const since=Date.parse('2025-10-01T00:00:00+08:00')/1000
+  const cursors=[],remote=new Map(),peers=new Set()
+  let interrupt=true
+  t.mock.method(globalThis,'fetch',async (input,options)=>{
+    const url=new URL(input)
+    const reply=result=>new Response(JSON.stringify({status:'ok',result}))
+    if (url.pathname.endsWith('/nav')) return new Response(JSON.stringify({code:0,data:{mid:111,wbi_img:{img_url:'https://i.example/7cd084941338484aae1ad9425b84077c.png',sub_url:'https://i.example/4932caff0ff746eab6f01bf08b70ac45.png'}}}))
+    if (url.pathname.endsWith('/fetch_session_msgs')) {
+      const mid=url.searchParams.get('talker_id'),cursor=Number(url.searchParams.get('begin_seqno'))
+      peers.add(mid)
+      if (mid==='123'||mid==='789') return new Response(JSON.stringify({code:0,data:{messages:[],has_more:0}}))
+      assert.equal(mid,'456')
+      cursors.push(cursor)
+      if (cursor===4 && interrupt) return new Response(JSON.stringify({code:-1}),{status:503})
+      const seq=cursor===0?(interrupt?14:16):cursor-1
+      const row=n=>({msg_key:String(n),msg_seqno:n,sender_uid:n===13?111:456,timestamp:since+n-1,content:`私信 ${n}`})
+      return new Response(JSON.stringify({code:0,data:{messages:seq===1?[row(1),row(0)]:[row(seq)],has_more:1}}))
+    }
+    const id=url.pathname.split('/')[4]
+    if (url.pathname.endsWith('/context')) return reply({messages:remote.get(id)||[]})
+    if (url.pathname.endsWith('/messages')) {
+      remote.set(id,[...(remote.get(id)||[]),JSON.parse(options.body)])
+      return reply({})
+    }
+    return reply({commit_count:0})
+  })
+  const run=async ()=>{
+    const start=await request(routes,route,{host,method:'POST',body:{startDate:'2025-10-01'}})
+    assert.equal(start.status,202)
+    for(let attempt=0;attempt<300;attempt++) {
+      const {data}=await request(routes,route,{host})
+      if(data.status.phase!=='running') return data.status
+      await new Promise(resolve=>setImmediate(resolve))
+    }
+    assert.fail('历史私信同步未完成')
+  }
+  assert.equal((await request(routes,route,{host,method:'POST',body:{startDate:'2025-02-30'}})).status,400)
+  assert.equal(cursors.length,0)
+  const first=await run()
+  assert.equal(first.phase,'partial')
+  assert.equal(first.history.failed,1)
+  assert.equal(JSON.parse(fs.readFileSync(path.join(cache,'456.json'))).messages.length,11)
+  const before=cursors.length
+  interrupt=false
+  const second=await run()
+  assert.equal(second.phase,'done')
+  assert.ok(peers.has('789'))
+  assert.deepEqual(cursors.slice(before),[0,16,15,4,3,2])
+  const local=JSON.parse(fs.readFileSync(path.join(cache,'456.json')))
+  assert.equal(local.backfill,undefined)
+  assert.equal(local.messages.length,16)
+  assert.ok(local.messages.some(row=>row.key==='1' && row.at===new Date(since*1000).toISOString()))
+  assert.equal(local.messages.find(row=>row.key==='13').role,'assistant')
+  assert.equal([...remote].find(([id])=>id.startsWith('whale-dm-456-'))[1].length,16)
+  assert.equal(fs.existsSync(path.join(home,'.bili-ai','dm-await-state.json')),false)
 })
 
 test('QR routes enforce trust, host authentication and POST before running login', async () => {

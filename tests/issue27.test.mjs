@@ -7,7 +7,6 @@ import {spawnSync} from 'node:child_process'
 import {fileURLToPath} from 'node:url'
 import {createSessionDelivery} from '../lib/session-delivery.js'
 import {watchOptions} from '../tools/lib/watch-options.mjs'
-import {recordDmMemory,flushMemoryExtractions} from '../lib/dm-memory.js'
 
 function fixture(t,cfg={}) {
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'whale-27-'))
@@ -73,37 +72,22 @@ test('rotation creation failure does not commit a new session; aborted queue doe
   const abort=new AbortController();abort.abort();await assert.rejects(d.send(f.request,abort.signal));assert.equal(f.sent.length,1)
 })
 
-test('rotation persists the old OV extraction task before creating the new DSH and does not wait for the slow extraction',async t=>{
+test('DSH rotation continues without an OV extraction job',async t=>{
   const f=fixture(t,{sessionRotateDays:1}),settings={url:'http://localhost:1933',account:'test',user:'whale',key:'test'}
   fs.writeFileSync(path.join(f.dir,'whale-openviking.json'),JSON.stringify(settings))
   const operations=[],create=f.args.controller.create
-  f.args.controller.create=async request=>{
-    if (f.created.length) assert.equal(fs.readdirSync(path.join(f.dir,'whale-memory-extractions')).length,1)
-    operations.push('create');return create(request)
-  }
-  let failExtract=true
-  t.mock.method(globalThis,'fetch',async (url,options)=>{
-    if(url.endsWith('/messages'))operations.push('append')
-    if(url.endsWith('/commit')) {
-      operations.push('extract')
-      if(failExtract)throw Error('OV offline')
-    }
-    const result = url.includes('/search/find') ? {memories:[]}
-      : url.endsWith('/commit') ? {status:'accepted',task_id:'extraction'}
-      : url.endsWith('/tasks/extraction') ? {status:'completed'} : {commit_count:0}
-    return {ok:true,json:async()=>({status:'ok',result})}
+  f.args.controller.create=async request=>{operations.push('create');return create(request)}
+  t.mock.method(globalThis,'fetch',async url=>{
+    assert.match(url,/\/search\/find$/)
+    return {ok:true,json:async()=>({status:'ok',result:{memories:[]}})}
   })
   const delivery=f.make();await delivery.send(f.request)
   operations.length=0
-  recordDmMemory({owner:'123',role:'user',content:'actual DM',key:'1',createdAt:Date.now()},{home:f.dir,settings})
   f.advance(86400001)
   await delivery.send(f.request)
   assert.deepEqual(operations,['create'])
   assert.equal(f.created.length,2);assert.equal(f.sent.length,2)
-  await flushMemoryExtractions({home:f.dir,settings})
-  assert.deepEqual(operations,['create','append','extract'])
-  const task=JSON.parse(fs.readFileSync(path.join(f.dir,'whale-memory-extractions',fs.readdirSync(path.join(f.dir,'whale-memory-extractions'))[0]),'utf8'))
-  assert.equal(task.status,'failed');assert.equal(task.dshSessionId,'bili-whale')
+  assert.equal(fs.existsSync(path.join(f.dir,'whale-memory-extractions')),false)
   assert.notEqual(f.sent.at(-1).sessionId,'bili-whale')
 })
 test('invalid state is reported without overwriting it',t=>{
