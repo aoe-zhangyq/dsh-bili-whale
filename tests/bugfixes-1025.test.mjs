@@ -97,6 +97,7 @@ test('DM retry stays in same session across rotation deadline and restart until 
  await delivery.send(request,undefined,{retainUntilAck:true})
  assert.equal(requests[1].sessionId,requests[0].sessionId);assert.equal(seen.size,1)
  await delivery.confirm(request.requestId);now+=9*60000
- await delivery.send({requestId:'next',content:[]})
+ await delivery.send({requestId:'next',content:[]},undefined,{retainUntilAck:true})
  assert.notEqual(requests[2].sessionId,requests[1].sessionId)
+ assert.equal(JSON.parse(fs.readFileSync(path.join(dshHome,'whale-session.json'),'utf8')).pendingRequest,'next')
 })
